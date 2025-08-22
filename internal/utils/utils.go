@@ -1,4 +1,4 @@
-package internal
+package utils
 
 import (
 	"fmt"
@@ -55,9 +55,21 @@ func ValidateSelfID(selfID string) error {
 		return fmt.Errorf("self ID cannot be empty")
 	}
 
-	// Check for invalid characters
-	if strings.ContainsAny(selfID, "/\\:*?\"<>|") {
-		return fmt.Errorf("self ID contains invalid characters")
+	if strings.Contains(selfID, "-") {
+		return fmt.Errorf("self_id cannot contain dash character: %s", selfID)
+	}
+
+	return nil
+}
+
+// ValidatePhysicalClusterID validates physical cluster ID
+func ValidatePhysicalClusterID(physicalClusterID string) error {
+	if physicalClusterID == "" {
+		return fmt.Errorf("physical cluster ID cannot be empty")
+	}
+
+	if strings.Contains(physicalClusterID, "-") {
+		return fmt.Errorf("physical_cluster_id cannot contain dash character: %s", physicalClusterID)
 	}
 
 	return nil

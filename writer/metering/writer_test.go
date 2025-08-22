@@ -13,7 +13,7 @@ import (
 
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
-	"github.com/pingcap/metering_sdk/internal"
+	"github.com/pingcap/metering_sdk/internal/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -81,7 +81,7 @@ func TestMeteringDataValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := internal.ValidateTimestamp(tt.data.Timestamp)
+			err := utils.ValidateTimestamp(tt.data.Timestamp)
 			if tt.expectError {
 				assert.Error(t, err, "expected error but got none")
 			} else {
@@ -119,7 +119,7 @@ func TestMetaDataValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := internal.ValidateClusterID(tt.data.ClusterID)
+			err := utils.ValidateClusterID(tt.data.ClusterID)
 			if tt.expectError {
 				assert.Error(t, err, "expected error but got none")
 			} else {
@@ -129,55 +129,94 @@ func TestMetaDataValidation(t *testing.T) {
 	}
 }
 
-// TestValidateIDs tests ID validation functionality
-func TestValidateIDs(t *testing.T) {
+// TestValidatePhysicalClusterID tests physical cluster ID validation functionality
+func TestValidatePhysicalClusterID(t *testing.T) {
 	tests := []struct {
 		name              string
 		physicalClusterID string
-		selfID            string
 		expectError       bool
 	}{
 		{
-			name:              "valid IDs without dashes",
+			name:              "valid physical cluster ID without dash",
 			physicalClusterID: "cluster123",
-			selfID:            "server001",
 			expectError:       false,
 		},
 		{
-			name:              "physical_cluster_id with dash",
+			name:              "physical cluster ID with dash",
 			physicalClusterID: "cluster-123",
-			selfID:            "server001",
 			expectError:       true,
 		},
 		{
-			name:              "self_id with dash",
-			physicalClusterID: "cluster123",
-			selfID:            "server-001",
-			expectError:       true,
-		},
-		{
-			name:              "both IDs with dashes",
-			physicalClusterID: "cluster-123",
-			selfID:            "server-001",
-			expectError:       true,
-		},
-		{
-			name:              "empty physical_cluster_id",
+			name:              "empty physical cluster ID",
 			physicalClusterID: "",
-			selfID:            "server001",
-			expectError:       false, // validateIDs only checks for dashes, not empty values
+			expectError:       true,
 		},
 		{
-			name:              "empty self_id",
-			physicalClusterID: "cluster123",
-			selfID:            "",
-			expectError:       false, // validateIDs only checks for dashes, not empty values
+			name:              "physical cluster ID with special characters",
+			physicalClusterID: "cluster@123",
+			expectError:       false, // Only checks for dash and empty, not other special chars
+		},
+		{
+			name:              "physical cluster ID with underscore",
+			physicalClusterID: "cluster_123",
+			expectError:       false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateIDs(tt.physicalClusterID, tt.selfID)
+			err := utils.ValidatePhysicalClusterID(tt.physicalClusterID)
+			if tt.expectError {
+				assert.Error(t, err, "expected error but got none")
+			} else {
+				assert.NoError(t, err, "unexpected error")
+			}
+		})
+	}
+}
+
+// TestValidateSelfID tests self ID validation functionality
+func TestValidateSelfID(t *testing.T) {
+	tests := []struct {
+		name        string
+		selfID      string
+		expectError bool
+	}{
+		{
+			name:        "valid self ID without dash",
+			selfID:      "server001",
+			expectError: false,
+		},
+		{
+			name:        "self ID with dash",
+			selfID:      "server-001",
+			expectError: true,
+		},
+		{
+			name:        "empty self ID",
+			selfID:      "",
+			expectError: true,
+		},
+		{
+			name:        "self ID with special characters",
+			selfID:      "server@001",
+			expectError: false, // Only checks for dash and empty, not other special chars
+		},
+		{
+			name:        "self ID with underscore",
+			selfID:      "server_001",
+			expectError: false,
+		},
+		{
+			name:        "self ID with multiple dashes",
+			selfID:      "server-001-prod",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := utils.ValidateSelfID(tt.selfID)
 			if tt.expectError {
 				assert.Error(t, err, "expected error but got none")
 			} else {

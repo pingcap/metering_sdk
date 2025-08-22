@@ -6,11 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
+	"github.com/pingcap/metering_sdk/internal/utils"
 	"github.com/pingcap/metering_sdk/storage"
 	"github.com/pingcap/metering_sdk/writer"
 	"go.uber.org/zap"
@@ -54,17 +54,6 @@ func NewMeteringWriter(provider storage.ObjectStorageProvider, cfg *config.Confi
 	}
 }
 
-// validateIDs validates that physical_cluster_id and self_id do not contain dashes
-func validateIDs(physicalClusterID, selfID string) error {
-	if strings.Contains(physicalClusterID, "-") {
-		return fmt.Errorf("physical_cluster_id cannot contain dash character: %s", physicalClusterID)
-	}
-	if strings.Contains(selfID, "-") {
-		return fmt.Errorf("self_id cannot contain dash character: %s", selfID)
-	}
-	return nil
-}
-
 // Write implements Writer interface, writes metering data
 func (w *MeteringWriter) Write(ctx context.Context, data interface{}) error {
 	meteringData, ok := data.(*common.MeteringData)
@@ -73,7 +62,14 @@ func (w *MeteringWriter) Write(ctx context.Context, data interface{}) error {
 	}
 
 	// Validate IDs do not contain hyphens
-	if err := validateIDs(meteringData.PhysicalClusterID, meteringData.SelfID); err != nil {
+	if err := utils.ValidateSelfID(meteringData.SelfID); err != nil {
+		return err
+	}
+	if err := utils.ValidatePhysicalClusterID(meteringData.PhysicalClusterID); err != nil {
+		return err
+	}
+	// Validate timestamp is minute-level
+	if err := utils.ValidateTimestamp(meteringData.Timestamp); err != nil {
 		return err
 	}
 

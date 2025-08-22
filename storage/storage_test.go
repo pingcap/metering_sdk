@@ -97,7 +97,7 @@ func TestMeteringWriterWithLocalFS(t *testing.T) {
 	// Create test data
 	now := time.Now()
 	testData := &common.MeteringData{
-		Timestamp:         now.Unix() / 60,
+		Timestamp:         now.Unix() / 60 * 60, // Ensure minute-level timestamp
 		Category:          "test",
 		PhysicalClusterID: "testcluster",
 		SelfID:            "testcomponent",
