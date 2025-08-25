@@ -25,11 +25,6 @@ func NewDiskCache(config *Config) (*DiskCache, error) {
 		return nil, fmt.Errorf("disk path is required for disk cache")
 	}
 
-	// Create cache directory
-	if err := os.MkdirAll(config.DiskPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create cache directory: %w", err)
-	}
-
 	cache := &DiskCache{
 		config:   config,
 		basePath: config.DiskPath,
@@ -378,27 +373,17 @@ func (c *DiskCache) evictLRU(targetSize int64) error {
 
 // clearAllFiles clears all files in the cache directory
 func (c *DiskCache) clearAllFiles() error {
-	// Read all files in the cache directory
-	entries, err := os.ReadDir(c.basePath)
+	// Use RemoveAll to safely remove all contents and recreate the directory
+	// This eliminates any path traversal risks as it operates on the base directory
+	if err := os.RemoveAll(c.basePath); err != nil {
+		return fmt.Errorf("failed to remove cache directory: %w", err)
+	}
+
+	// Recreate the cache directory
+	err := c.ensureDir(c.basePath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// Directory doesn't exist, no need to clean
-			return nil
-		}
-		return fmt.Errorf("failed to read cache directory: %w", err)
+		return fmt.Errorf("failed to recreate cache directory: %w", err)
 	}
-
-	// Delete all files (keep subdirectories)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			filePath := filepath.Join(c.basePath, entry.Name())
-			if err := os.Remove(filePath); err != nil {
-				// Log error but continue cleaning other files
-				fmt.Printf("Warning: failed to remove cache file %s: %v\n", filePath, err)
-			}
-		}
-	}
-
 	// Reset cache state
 	c.index = make(map[string]*CacheItem)
 	c.size = 0
