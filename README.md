@@ -345,6 +345,7 @@ if err := writer.Write(ctx, meteringData); err != nil {
     }
 }
 ```
+// add check test
 
 ## License
 
