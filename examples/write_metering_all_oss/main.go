@@ -48,7 +48,7 @@ func main() {
 	bucketName := "your-bucket-name" // Replace with your OSS bucket name
 	region := "your-region"          // Replace with your OSS region
 	prefix := "demo"                 // OSS path prefix, optional
-	cerdProvider := credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
+	credProvider := credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
 		ststoken, err := getStSToken(profile)
 		if err != nil {
 			return credentials.Credentials{}, err
@@ -59,7 +59,7 @@ func main() {
 			SecurityToken:   ststoken.StsToken,
 		}, nil
 	})
-	osscfg := oss.LoadDefaultConfig().WithRegion(region).WithCredentialsProvider(cerdProvider)
+	osscfg := oss.LoadDefaultConfig().WithRegion(region).WithCredentialsProvider(credProvider)
 	// OSS configuration (please fill in according to your actual situation)
 	ossConfig := &storage.ProviderConfig{
 		Type:   storage.ProviderTypeOSS,

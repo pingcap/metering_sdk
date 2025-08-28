@@ -131,9 +131,12 @@ func (o *OSSProvider) Exists(ctx context.Context, path string) (bool, error) {
 		Bucket: &o.bucket,
 		Key:    &fullPath,
 	})
-	var serviceError *oss.ServiceError
-	if errors.As(err, &serviceError) && (serviceError.Code == "NoSuchKey" || serviceError.StatusCode == http.StatusNotFound) {
-		return false, nil
+	if err != nil {
+		var serviceError *oss.ServiceError
+		if errors.As(err, &serviceError) && (serviceError.Code == "NoSuchKey" || serviceError.StatusCode == http.StatusNotFound) {
+			return false, nil
+		}
+		return false, err
 	}
 	return true, nil
 }
