@@ -28,6 +28,7 @@ type (
 	AWSConfig      = provider.AWSConfig
 	GCSConfig      = provider.GCSConfig
 	AzureConfig    = provider.AzureConfig
+	OSSConfig      = provider.OSSConfig
 	LocalFSConfig  = provider.LocalFSConfig
 )
 
@@ -36,5 +37,6 @@ const (
 	ProviderTypeS3      = provider.ProviderTypeS3
 	ProviderTypeGCS     = provider.ProviderTypeGCS
 	ProviderTypeAzure   = provider.ProviderTypeAzure
+	ProviderTypeOSS     = provider.ProviderTypeOSS
 	ProviderTypeLocalFS = provider.ProviderTypeLocalFS
 )

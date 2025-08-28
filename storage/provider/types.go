@@ -10,6 +10,8 @@ const (
 	ProviderTypeGCS ProviderType = "gcs"
 	// ProviderTypeAzure Azure Blob Storage provider
 	ProviderTypeAzure ProviderType = "azure"
+	// ProviderTypeOSS Alibaba Cloud OSS storage provider
+	ProviderTypeOSS ProviderType = "oss"
 	// ProviderTypeLocalFS local filesystem storage provider
 	ProviderTypeLocalFS ProviderType = "localfs"
 )
@@ -26,6 +28,7 @@ type ProviderConfig struct {
 	AWS     *AWSConfig     `json:"aws,omitempty"`     // AWS S3 specific configuration
 	GCS     *GCSConfig     `json:"gcs,omitempty"`     // Google Cloud Storage specific configuration
 	Azure   *AzureConfig   `json:"azure,omitempty"`   // Azure Blob Storage specific configuration
+	OSS     *OSSConfig     `json:"oss,omitempty"`     // Alibaba Cloud OSS specific configuration
 	LocalFS *LocalFSConfig `json:"localfs,omitempty"` // local filesystem specific configuration
 }
 
@@ -45,6 +48,12 @@ type GCSConfig struct {
 // AzureConfig Azure Blob Storage specific configuration
 type AzureConfig struct {
 	AccountName string `json:"account_name,omitempty"`
+}
+
+// OSSConfig Alibaba Cloud OSS specific configuration
+type OSSConfig struct {
+	// Custom OSS Config object for oss-sdk-go-v2
+	CustomConfig interface{} `json:"-"` // not serialized, used to pass oss config
 }
 
 // LocalFSConfig local filesystem specific configuration
