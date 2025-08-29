@@ -2,38 +2,78 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"os"
+	"os/exec"
 	"time"
 
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
 	"github.com/pingcap/metering_sdk/storage"
 	meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
 )
 
-func main() {
-	fmt.Println("=== S3 Metering Writer Demo ===")
-	os.Setenv("AWS_PROFILE", "your-profile") // Replace with your AWS profile name, if using SSO login
-	bucketName := "your-bucket-name"         // Replace with your S3 bucket name
-	region := "your-region"                  // Replace with your S3 region
-	prefix := "demo"                         // S3 path prefix, optional
+type SsoLoginResponse struct {
+	Mode            string `json:"mode"`
+	AccessKeyId     string `json:"access_key_id"`
+	AccessKeySecret string `json:"access_key_secret"`
+	StsToken        string `json:"sts_token"`
+}
 
-	// S3 configuration (please fill in according to your actual situation)
-	s3Config := &storage.ProviderConfig{
-		Type:   storage.ProviderTypeS3,
+// use this function if test in pc
+func getStSToken(profile string) (*SsoLoginResponse, error) {
+	// build the command for acs-sso login
+	cmd := exec.Command("acs-sso", "login", "--profile", profile)
+
+	// get the output of the command
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute command: %w", err)
+	}
+
+	// parse the output as JSON
+	var response SsoLoginResponse
+	err = json.Unmarshal(output, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return &response, nil
+}
+func main() {
+	fmt.Println("=== OSS Metering Writer Demo ===")
+	profile := "your-profile"        // Replace with your profile name
+	bucketName := "your-bucket-name" // Replace with your OSS bucket name
+	region := "your-region"          // Replace with your OSS region
+	prefix := "demo"                 // OSS path prefix, optional
+	credProvider := credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
+		ststoken, err := getStSToken(profile)
+		if err != nil {
+			return credentials.Credentials{}, err
+		}
+		return credentials.Credentials{
+			AccessKeyID:     ststoken.AccessKeyId,
+			AccessKeySecret: ststoken.AccessKeySecret,
+			SecurityToken:   ststoken.StsToken,
+		}, nil
+	})
+	osscfg := oss.LoadDefaultConfig().WithRegion(region).WithCredentialsProvider(credProvider)
+	// OSS configuration (please fill in according to your actual situation)
+	ossConfig := &storage.ProviderConfig{
+		Type:   storage.ProviderTypeOSS,
 		Bucket: bucketName,
 		Region: region,
 		Prefix: prefix,
-		// Endpoint: "https://s3.your-provider.com", // Add if you need a custom endpoint
-		// AWS: &storage.AWSConfig{
-		//  CustomConfig: nil, // Custom aws config file
-		// }
+		OSS: &storage.OSSConfig{
+			CustomConfig: osscfg, // Custom oss config file, if test in pc ,if in ack, keep nil
+		},
 	}
 
-	provider, err := storage.NewObjectStorageProvider(s3Config)
+	provider, err := storage.NewObjectStorageProvider(ossConfig)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create S3 provider: %v", err))
+		panic(fmt.Sprintf("Failed to create OSS provider: %v", err))
 	}
 
 	// Create metering writer
@@ -104,14 +144,13 @@ func main() {
 
 	// Write all metering data entries
 	for i, meteringData := range meteringDataList {
-		fmt.Printf("Writing metering data %d to S3...\n", i+1)
+		fmt.Printf("Writing metering data %d to OSS...\n", i+1)
 		if err := meteringWriter.Write(ctx, meteringData); err != nil {
 			fmt.Printf("Failed to write metering data %d: %v\n", i+1, err)
 		} else {
-			fmt.Printf("SUCCESS: metering data %d written to S3\n", i+1)
+			fmt.Printf("SUCCESS: metering data %d written to OSS\n", i+1)
 		}
 	}
-
 	// Test metering writer with existing file
 	// Create metering writer
 	cfg = config.DefaultConfig().WithDevelopmentLogger().WithOverwriteExisting(false)
@@ -141,13 +180,13 @@ func main() {
 	if err := meteringWriter2.Write(ctx, &data); err != nil {
 		fmt.Printf("Failed to write metering data: %v\n", err)
 	} else {
-		fmt.Println("SUCCESS: metering data written to S3")
+		fmt.Println("SUCCESS: metering data written to OSS")
 	}
 	if err := meteringWriter2.Write(ctx, &data); err != nil {
 		fmt.Printf("Failed to write metering data: %v\n", err)
 	} else {
-		fmt.Println("SUCCESS: metering data written to S3")
+		fmt.Println("SUCCESS: metering data written to OSS")
 	}
 	fmt.Println("=== Demo completed ===")
-	fmt.Println("Check your S3 bucket for the uploaded metering files")
+	fmt.Println("Check your OSS bucket for the uploaded metering files")
 }
