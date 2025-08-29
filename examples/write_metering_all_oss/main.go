@@ -151,7 +151,7 @@ func main() {
 			fmt.Printf("SUCCESS: metering data %d written to OSS\n", i+1)
 		}
 	}
-	//test metering writer with file exist
+	// Test metering writer with existing file
 	// Create metering writer
 	cfg = config.DefaultConfig().WithDevelopmentLogger().WithOverwriteExisting(false)
 	meteringWriter2 := meteringwriter.NewMeteringWriter(provider, cfg)
