@@ -14,7 +14,7 @@ jobs:
   lint:
     name: lint
     if: ${{ !startsWith(github.head_ref, 'renovate/') }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
@@ -57,7 +57,7 @@ jobs:
   unit-test:
     name: unit-test
     if: ${{ !startsWith(github.head_ref, 'renovate/') }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
