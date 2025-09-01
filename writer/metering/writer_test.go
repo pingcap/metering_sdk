@@ -47,7 +47,7 @@ func TestMeteringDataValidation(t *testing.T) {
 		{
 			name: "invalid timestamp",
 			data: &common.MeteringData{
-				Timestamp: time.Now().Unix() + 3600, // not minute-level timestamp
+				Timestamp: 1756709724, // not minute-level timestamp
 				Category:  "tidbserver",
 				SelfID:    "server001",
 			},
