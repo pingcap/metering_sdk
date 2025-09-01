@@ -22,18 +22,17 @@ import (
 
 // MeteringFileInfo metering file information
 type MeteringFileInfo struct {
-	Path              string `json:"path"`                // Complete file path
-	Timestamp         int64  `json:"timestamp"`           // Timestamp
-	Category          string `json:"category"`            // Service category
-	PhysicalClusterID string `json:"physical_cluster_id"` // Physical cluster ID
-	SelfID            string `json:"self_id"`             // Component ID
-	Part              int    `json:"part"`                // Part number
+	Path      string `json:"path"`      // Complete file path
+	Timestamp int64  `json:"timestamp"` // Timestamp
+	Category  string `json:"category"`  // Service category
+	SelfID    string `json:"self_id"`   // Component ID
+	Part      int    `json:"part"`      // Part number
 }
 
 // TimestampFiles file information organized by timestamp
 type TimestampFiles struct {
-	Timestamp int64                          `json:"timestamp"` // Timestamp
-	Files     map[string]map[string][]string `json:"files"`     // category -> physical_cluster_id -> []file_paths
+	Timestamp int64               `json:"timestamp"` // Timestamp
+	Files     map[string][]string `json:"files"`     // category -> []file_paths
 }
 
 // MeteringReader metering data reader
@@ -79,16 +78,16 @@ func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int
 	// Parse file paths and organize data
 	result := &TimestampFiles{
 		Timestamp: timestamp,
-		Files:     make(map[string]map[string][]string),
+		Files:     make(map[string][]string),
 	}
 
-	// File path format: metering/ru/{timestamp}/{category}/{physical_cluster_id}-{self_id}-{part}.json.gz
-	// Since physical_cluster_id and self_id do not contain dashes, parsing becomes simple
-	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^-]+)-([^-]+)-(\d+)\.json\.gz$`)
+	// File path format: metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
+	// Since self_id does not contain dashes, parsing becomes simple
+	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^-]+)-(\d+)\.json\.gz$`)
 
 	for _, filePath := range files {
 		matches := pathRegex.FindStringSubmatch(filePath)
-		if len(matches) != 6 {
+		if len(matches) != 5 {
 			r.logger.Warn("Invalid file path format, skipping",
 				zap.String("path", filePath),
 			)
@@ -101,17 +100,8 @@ func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int
 		}
 
 		category := matches[2]
-		physicalClusterID := matches[3]
-		selfID := matches[4]
-
-		// Verify IDs do not contain dashes (additional safety check)
-		if strings.Contains(physicalClusterID, "-") {
-			r.logger.Warn("Invalid physical_cluster_id contains dash, skipping",
-				zap.String("path", filePath),
-				zap.String("physical_cluster_id", physicalClusterID),
-			)
-			continue
-		}
+		selfID := matches[3]
+		//TODO improve selfID validation
 		if strings.Contains(selfID, "-") {
 			r.logger.Warn("Invalid self_id contains dash, skipping",
 				zap.String("path", filePath),
@@ -120,26 +110,16 @@ func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int
 			continue
 		}
 
-		// Initialize nested maps
-		if result.Files[category] == nil {
-			result.Files[category] = make(map[string][]string)
-		}
-		if result.Files[category][physicalClusterID] == nil {
-			result.Files[category][physicalClusterID] = make([]string, 0)
-		}
-
 		// Add file path
-		result.Files[category][physicalClusterID] = append(
-			result.Files[category][physicalClusterID],
+		result.Files[category] = append(
+			result.Files[category],
 			filePath,
 		)
 	}
 
 	// Sort file paths to ensure consistent results
 	for category := range result.Files {
-		for physicalClusterID := range result.Files[category] {
-			sort.Strings(result.Files[category][physicalClusterID])
-		}
+		sort.Strings(result.Files[category])
 	}
 
 	r.logger.Info("Successfully listed metering files by timestamp",
@@ -153,12 +133,12 @@ func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int
 
 // GetFileInfo parses file path and returns file information
 func (r *MeteringReader) GetFileInfo(filePath string) (*MeteringFileInfo, error) {
-	// File path format: metering/ru/{timestamp}/{category}/{physical_cluster_id}-{self_id}-{part}.json.gz
-	// Since physical_cluster_id and self_id do not contain dashes, parsing becomes simple
-	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^-]+)-([^-]+)-(\d+)\.json\.gz$`)
+	// File path format: metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
+	// Since self_id does not contain dashes, parsing becomes simple
+	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^-]+)-(\d+)\.json\.gz$`)
 
 	matches := pathRegex.FindStringSubmatch(filePath)
-	if len(matches) != 6 {
+	if len(matches) != 5 {
 		return nil, fmt.Errorf("invalid file path format: %s", filePath)
 	}
 
@@ -168,28 +148,22 @@ func (r *MeteringReader) GetFileInfo(filePath string) (*MeteringFileInfo, error)
 	}
 
 	category := matches[2]
-	physicalClusterID := matches[3]
-	selfID := matches[4]
-	part, err := strconv.Atoi(matches[5])
+	selfID := matches[3]
+	part, err := strconv.Atoi(matches[4])
 	if err != nil {
 		return nil, fmt.Errorf("invalid part number in path %s: %w", filePath, err)
 	}
 
-	// Verify IDs do not contain dashes (additional safety check)
-	if strings.Contains(physicalClusterID, "-") {
-		return nil, fmt.Errorf("physical_cluster_id cannot contain dash character: %s", physicalClusterID)
-	}
 	if strings.Contains(selfID, "-") {
 		return nil, fmt.Errorf("self_id cannot contain dash character: %s", selfID)
 	}
 
 	return &MeteringFileInfo{
-		Path:              filePath,
-		Timestamp:         timestamp,
-		Category:          category,
-		PhysicalClusterID: physicalClusterID,
-		SelfID:            selfID,
-		Part:              part,
+		Path:      filePath,
+		Timestamp: timestamp,
+		Category:  category,
+		SelfID:    selfID,
+		Part:      part,
 	}, nil
 }
 
@@ -261,27 +235,6 @@ func (r *MeteringReader) GetCategories(ctx context.Context, timestamp int64) ([]
 	return categories, nil
 }
 
-// GetPhysicalClusterIDs gets all physical cluster IDs under the specified timestamp and category
-func (r *MeteringReader) GetPhysicalClusterIDs(ctx context.Context, timestamp int64, category string) ([]string, error) {
-	timestampFiles, err := r.ListFilesByTimestamp(ctx, timestamp)
-	if err != nil {
-		return nil, err
-	}
-
-	categoryFiles, exists := timestampFiles.Files[category]
-	if !exists {
-		return []string{}, nil
-	}
-
-	clusterIDs := make([]string, 0, len(categoryFiles))
-	for clusterID := range categoryFiles {
-		clusterIDs = append(clusterIDs, clusterID)
-	}
-	sort.Strings(clusterIDs)
-
-	return clusterIDs, nil
-}
-
 // GetFilesByCategory gets all file paths under the specified timestamp and category
 func (r *MeteringReader) GetFilesByCategory(ctx context.Context, timestamp int64, category string) ([]string, error) {
 	timestampFiles, err := r.ListFilesByTimestamp(ctx, timestamp)
@@ -295,27 +248,20 @@ func (r *MeteringReader) GetFilesByCategory(ctx context.Context, timestamp int64
 	}
 
 	var allFiles []string
-	for _, files := range categoryFiles {
-		allFiles = append(allFiles, files...)
-	}
+	allFiles = append(allFiles, categoryFiles...)
 	sort.Strings(allFiles)
 
 	return allFiles, nil
 }
 
-// GetFilesByCluster gets all file paths under the specified timestamp, category and physical cluster ID
-func (r *MeteringReader) GetFilesByCluster(ctx context.Context, timestamp int64, category, physicalClusterID string) ([]string, error) {
+// GetFilesByCluster gets all file paths under the specified timestamp, category
+func (r *MeteringReader) GetFilesByCluster(ctx context.Context, timestamp int64, category string) ([]string, error) {
 	timestampFiles, err := r.ListFilesByTimestamp(ctx, timestamp)
 	if err != nil {
 		return nil, err
 	}
 
-	categoryFiles, exists := timestampFiles.Files[category]
-	if !exists {
-		return []string{}, nil
-	}
-
-	files, exists := categoryFiles[physicalClusterID]
+	files, exists := timestampFiles.Files[category]
 	if !exists {
 		return []string{}, nil
 	}

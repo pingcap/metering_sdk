@@ -70,11 +70,10 @@ func main() {
 
 	// Write large metering data that should be paginated
 	meteringData := &common.MeteringData{
-		PhysicalClusterID: "clusterlarge001",    // No dash to pass validation
-		SelfID:            "tidbserverlarge01",  // No dash to pass validation
-		Timestamp:         now.Unix() / 60 * 60, // Ensure minute-level timestamp
-		Category:          "tidb-server",
-		Data:              largeDataSet,
+		SelfID:    "tidbserverlarge01",  // No dash to pass validation
+		Timestamp: now.Unix() / 60 * 60, // Ensure minute-level timestamp
+		Category:  "tidb-server",
+		Data:      largeDataSet,
 	}
 
 	fmt.Printf("Writing large metering data with %d logical clusters...\n", len(meteringData.Data))
@@ -103,11 +102,10 @@ func main() {
 	}
 
 	secondMeteringData := &common.MeteringData{
-		PhysicalClusterID: "clustermedium002",   // No dash to pass validation
-		SelfID:            "tikvservermedium01", // No dash to pass validation
-		Timestamp:         now.Unix() / 60 * 60, // Same timestamp
-		Category:          "tikv-server",
-		Data:              secondDataSet,
+		SelfID:    "tikvservermedium01", // No dash to pass validation
+		Timestamp: now.Unix() / 60 * 60, // Same timestamp
+		Category:  "tikv-server",
+		Data:      secondDataSet,
 	}
 
 	fmt.Printf("Writing second metering data with %d logical clusters...\n", len(secondMeteringData.Data))

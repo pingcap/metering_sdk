@@ -97,10 +97,9 @@ func TestMeteringWriterWithLocalFS(t *testing.T) {
 	// Create test data
 	now := time.Now()
 	testData := &common.MeteringData{
-		Timestamp:         now.Unix() / 60 * 60, // Ensure minute-level timestamp
-		Category:          "test",
-		PhysicalClusterID: "testcluster",
-		SelfID:            "testcomponent",
+		Timestamp: now.Unix() / 60 * 60, // Ensure minute-level timestamp
+		Category:  "test",
+		SelfID:    "testcomponent",
 		Data: []map[string]interface{}{
 			{
 				"logical_cluster": "lc-test",
@@ -116,7 +115,7 @@ func TestMeteringWriterWithLocalFS(t *testing.T) {
 	// Verify file is created
 	expectedPath := filepath.Join(tempDir, "metering", "ru",
 		fmt.Sprintf("%d", testData.Timestamp), "test",
-		fmt.Sprintf("%s-%s-0.json.gz", testData.PhysicalClusterID, testData.SelfID))
+		fmt.Sprintf("%s-0.json.gz", testData.SelfID))
 
 	_, err = os.Stat(expectedPath)
 	assert.False(t, os.IsNotExist(err), "Metering data file was not created at expected path: %s", expectedPath)

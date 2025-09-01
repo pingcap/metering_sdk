@@ -89,10 +89,9 @@ func TestMeteringReader_Read(t *testing.T) {
 
 	// Create test data
 	testData := common.MeteringData{
-		Timestamp:         1755687660,
-		Category:          "tidb-server",
-		PhysicalClusterID: "cluster-123",
-		SelfID:            "server-001",
+		Timestamp: 1755687660,
+		Category:  "tidb-server",
+		SelfID:    "server-001",
 		Data: []map[string]interface{}{
 			{
 				"logical_cluster_id": "lc-001",
@@ -104,7 +103,7 @@ func TestMeteringReader_Read(t *testing.T) {
 	compressedData, err := createCompressedTestData(testData)
 	assert.NoError(t, err, "Failed to create test data")
 
-	path := "metering/ru/1755687660/tidb-server/cluster-123-server-001-0.json.gz"
+	path := "metering/ru/1755687660/tidb-server/server-001-0.json.gz"
 	provider.files[path] = compressedData
 
 	cfg := &config.Config{
@@ -140,9 +139,9 @@ func TestMeteringReader_List(t *testing.T) {
 
 	// Create test files
 	testFiles := []string{
-		"metering/ru/1755687660/tidb-server/cluster-123-server-001-0.json.gz",
-		"metering/ru/1755687720/tidb-server/cluster-123-server-001-0.json.gz",
-		"metering/ru/1755687780/pd-server/cluster-123-server-001-0.json.gz",
+		"metering/ru/1755687660/tidb-server/server-001-0.json.gz",
+		"metering/ru/1755687720/tidb-server/server-001-0.json.gz",
+		"metering/ru/1755687780/pd-server/server-001-0.json.gz",
 	}
 
 	for _, file := range testFiles {
@@ -187,27 +186,25 @@ func TestMeteringReader_GetFileInfo(t *testing.T) {
 	}{
 		{
 			name:     "valid file path",
-			filePath: "metering/ru/1755687660/tidbserver/cluster123-server001-0.json.gz",
+			filePath: "metering/ru/1755687660/tidbserver/server001-0.json.gz",
 			expected: &MeteringFileInfo{
-				Path:              "metering/ru/1755687660/tidbserver/cluster123-server001-0.json.gz",
-				Timestamp:         1755687660,
-				Category:          "tidbserver",
-				PhysicalClusterID: "cluster123",
-				SelfID:            "server001",
-				Part:              0,
+				Path:      "metering/ru/1755687660/tidbserver/server001-0.json.gz",
+				Timestamp: 1755687660,
+				Category:  "tidbserver",
+				SelfID:    "server001",
+				Part:      0,
 			},
 			wantErr: false,
 		},
 		{
 			name:     "valid file path with tikv",
-			filePath: "metering/ru/1755687660/tikv/cluster456-tikv002-1.json.gz",
+			filePath: "metering/ru/1755687660/tikv/tikv002-1.json.gz",
 			expected: &MeteringFileInfo{
-				Path:              "metering/ru/1755687660/tikv/cluster456-tikv002-1.json.gz",
-				Timestamp:         1755687660,
-				Category:          "tikv",
-				PhysicalClusterID: "cluster456",
-				SelfID:            "tikv002",
-				Part:              1,
+				Path:      "metering/ru/1755687660/tikv/tikv002-1.json.gz",
+				Timestamp: 1755687660,
+				Category:  "tikv",
+				SelfID:    "tikv002",
+				Part:      1,
 			},
 			wantErr: false,
 		},
@@ -219,19 +216,13 @@ func TestMeteringReader_GetFileInfo(t *testing.T) {
 		},
 		{
 			name:     "missing part number in filename",
-			filePath: "metering/ru/1755687660/tidbserver/cluster123-server.json.gz",
-			expected: nil,
-			wantErr:  true,
-		},
-		{
-			name:     "physical_cluster_id contains dash",
-			filePath: "metering/ru/1755687660/tidbserver/cluster-123-server001-0.json.gz",
+			filePath: "metering/ru/1755687660/tidbserver/server.json.gz",
 			expected: nil,
 			wantErr:  true,
 		},
 		{
 			name:     "self_id contains dash",
-			filePath: "metering/ru/1755687660/tidbserver/cluster123-server-001-0.json.gz",
+			filePath: "metering/ru/1755687660/tidbserver/server-001-0.json.gz",
 			expected: nil,
 			wantErr:  true,
 		},
@@ -251,7 +242,6 @@ func TestMeteringReader_GetFileInfo(t *testing.T) {
 					assert.Equal(t, tt.expected.Path, result.Path, "Expected Path %s, but got %s", tt.expected.Path, result.Path)
 					assert.Equal(t, tt.expected.Timestamp, result.Timestamp, "Expected Timestamp %d, but got %d", tt.expected.Timestamp, result.Timestamp)
 					assert.Equal(t, tt.expected.Category, result.Category, "Expected Category %s, but got %s", tt.expected.Category, result.Category)
-					assert.Equal(t, tt.expected.PhysicalClusterID, result.PhysicalClusterID, "Expected PhysicalClusterID %s, but got %s", tt.expected.PhysicalClusterID, result.PhysicalClusterID)
 					assert.Equal(t, tt.expected.SelfID, result.SelfID, "Expected SelfID %s, but got %s", tt.expected.SelfID, result.SelfID)
 					assert.Equal(t, tt.expected.Part, result.Part, "Expected Part %d, but got %d", tt.expected.Part, result.Part)
 				}
@@ -270,11 +260,11 @@ func TestMeteringReader_ListFilesByTimestamp(t *testing.T) {
 
 	// Mock file data
 	testFiles := []string{
-		"metering/ru/1755687660/tidbserver/cluster123-server001-0.json.gz",
-		"metering/ru/1755687660/tidbserver/cluster123-server002-0.json.gz",
-		"metering/ru/1755687660/tikv/cluster123-tikv001-0.json.gz",
-		"metering/ru/1755687660/tikv/cluster456-tikv001-0.json.gz",
-		"metering/ru/1755687660/pd/cluster123-pd001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/server001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/server002-0.json.gz",
+		"metering/ru/1755687660/tikv/tikv001-0.json.gz",
+		"metering/ru/1755687660/tikv/tikv002-0.json.gz",
+		"metering/ru/1755687660/pd/pd001-0.json.gz",
 	}
 
 	// Create mock files
@@ -296,15 +286,12 @@ func TestMeteringReader_ListFilesByTimestamp(t *testing.T) {
 
 	// Check tidbserver category
 	if tidbFiles, exists := result.Files["tidbserver"]; exists {
-		assert.Equal(t, 1, len(tidbFiles), "Expected tidbserver category to have 1 cluster but got %d", len(tidbFiles))
-		if cluster123Files, exists := tidbFiles["cluster123"]; exists {
-			assert.Equal(t, 2, len(cluster123Files), "Expected cluster123 to have 2 files but got %d", len(cluster123Files))
-		}
+		assert.Equal(t, 2, len(tidbFiles), "Expected tidbserver category to have 2 files but got %d", len(tidbFiles))
 	}
 
 	// Check tikv category
 	if tikvFiles, exists := result.Files["tikv"]; exists {
-		assert.Equal(t, 2, len(tikvFiles), "Expected tikv category to have 2 clusters but got %d", len(tikvFiles))
+		assert.Equal(t, 2, len(tikvFiles), "Expected tikv category to have 2 files but got %d", len(tikvFiles))
 	}
 }
 
@@ -318,9 +305,9 @@ func TestMeteringReader_GetCategories(t *testing.T) {
 
 	// Mock file data
 	testFiles := []string{
-		"metering/ru/1755687660/tidbserver/cluster123-server001-0.json.gz",
-		"metering/ru/1755687660/tikv/cluster123-tikv001-0.json.gz",
-		"metering/ru/1755687660/pd/cluster123-pd001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/server001-0.json.gz",
+		"metering/ru/1755687660/tikv/tikv001-0.json.gz",
+		"metering/ru/1755687660/pd/pd001-0.json.gz",
 	}
 
 	for _, filePath := range testFiles {
@@ -351,9 +338,9 @@ func TestMeteringReader_GetFilesByCategory(t *testing.T) {
 
 	// Mock file data
 	testFiles := []string{
-		"metering/ru/1755687660/tidbserver/cluster123-server001-0.json.gz",
-		"metering/ru/1755687660/tidbserver/cluster456-server001-0.json.gz",
-		"metering/ru/1755687660/tikv/cluster123-tikv001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/server001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/server002-0.json.gz",
+		"metering/ru/1755687660/tikv/tikv001-0.json.gz",
 	}
 
 	for _, filePath := range testFiles {
