@@ -57,7 +57,7 @@ func NewMeteringReader(provider storage.ObjectStorageProvider, cfg *config.Confi
 }
 
 // ListFilesByTimestamp lists all metering file information by timestamp
-// Path format: /metering/ru/{timestamp}/{category}/{physical_cluster_id}-{self_id}-{part}.json.gz
+// Path format: /metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
 func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int64) (*TimestampFiles, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -363,7 +363,9 @@ func (r *MeteringReader) decompressData(reader io.Reader) ([]byte, error) {
 	defer gzipReader.Close()
 
 	var buffer bytes.Buffer
-	if _, err := io.Copy(&buffer, gzipReader); err != nil {
+	// Limit decompression to prevent DoS attacks (max 100MB)
+	limitedReader := io.LimitReader(gzipReader, 100*1024*1024)
+	if _, err := io.Copy(&buffer, limitedReader); err != nil {
 		return nil, fmt.Errorf("failed to decompress data: %w", err)
 	}
 

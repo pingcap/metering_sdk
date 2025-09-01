@@ -86,7 +86,15 @@ func (w *MeteringWriter) Write(ctx context.Context, data interface{}) error {
 
 // writeWithPagination writes paginated data
 func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *common.MeteringData) error {
-	var currentPage []map[string]interface{}
+	// Pre-allocate currentPage with an estimated capacity to reduce allocations
+	// Estimate based on total data length, but cap at a reasonable maximum
+	estimatedPageSize := len(meteringData.Data) / 10 // rough estimate
+	if estimatedPageSize < 10 {
+		estimatedPageSize = 10
+	} else if estimatedPageSize > 100 {
+		estimatedPageSize = 100
+	}
+	currentPage := make([]map[string]interface{}, 0, estimatedPageSize)
 	var currentSize int64
 	pageNum := 0
 
@@ -113,8 +121,8 @@ func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *
 				return err
 			}
 
-			// Reset current page
-			currentPage = nil
+			// Reset current page with pre-allocated capacity
+			currentPage = currentPage[:0] // reuse underlying array
 			currentSize = 0
 			pageNum++
 		}

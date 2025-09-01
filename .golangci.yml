@@ -1,0 +1,72 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bodyclose
+    - durationcheck
+    - errcheck
+    - gosec
+    - ineffassign
+    - makezero
+    - misspell
+    - prealloc
+    - predeclared
+    - rowserrcheck
+    - staticcheck
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        - G101
+      severity: low
+      confidence: low
+    staticcheck:
+      checks:
+        - -SA2002
+        - -ST1003
+        - S1002
+        - S1004
+        - S1007
+        - S1009
+        - S1010
+        - S1012
+        - S1019
+        - S1020
+        - S1021
+        - S1024
+        - S1030
+        - SA2*
+        - SA3*
+        - SA4009
+        - SA5*
+        - SA6000
+        - SA6001
+        - SA6005
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gosec
+          - makezero
+          - rowserrcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

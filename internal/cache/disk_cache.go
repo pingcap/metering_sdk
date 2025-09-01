@@ -58,14 +58,18 @@ func (c *DiskCache) Get(key string) (interface{}, bool) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		// File doesn't exist, remove from index
-		go c.Delete(key)
+		go func() {
+			_ = c.Delete(key)
+		}()
 		return nil, false
 	}
 
 	var value interface{}
 	if err := json.Unmarshal(data, &value); err != nil {
 		// File corrupted, remove from index
-		go c.Delete(key)
+		go func() {
+			_ = c.Delete(key)
+		}()
 		return nil, false
 	}
 
@@ -116,7 +120,7 @@ func (c *DiskCache) Set(key string, value interface{}) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}
 
@@ -147,7 +151,7 @@ func (c *DiskCache) Delete(key string) error {
 		delete(c.index, key)
 
 		// Save index
-		c.saveIndex() // ignore error
+		_ = c.saveIndex() // ignore error
 	}
 
 	return nil
@@ -299,7 +303,7 @@ func (c *DiskCache) saveIndex() error {
 		return err
 	}
 
-	return os.WriteFile(indexPath, data, 0644)
+	return os.WriteFile(indexPath, data, 0600)
 }
 
 // evictLRU evicts least recently used cache items based on access time
