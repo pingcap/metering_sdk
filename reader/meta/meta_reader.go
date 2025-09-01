@@ -282,6 +282,7 @@ func (r *MetaReader) decompressData(reader io.Reader) ([]byte, error) {
 	defer gzipReader.Close()
 
 	var buffer bytes.Buffer
+	// #nosec G110 - reader must deal all file,the file input is safe
 	if _, err := io.Copy(&buffer, gzipReader); err != nil {
 		return nil, fmt.Errorf("failed to decompress data: %w", err)
 	}
