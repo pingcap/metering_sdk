@@ -18,12 +18,11 @@ import (
 
 // pageMeteringData paginated metering data structure
 type pageMeteringData struct {
-	Timestamp         int64                    `json:"timestamp"`           // minute-level timestamp
-	Category          string                   `json:"category"`            // service category identifier
-	PhysicalClusterID string                   `json:"physical_cluster_id"` // physical cluster ID
-	SelfID            string                   `json:"self_id"`             // component ID
-	Part              int                      `json:"part"`                // pagination number
-	Data              []map[string]interface{} `json:"data"`                // current page logical cluster metering data
+	Timestamp int64                    `json:"timestamp"` // minute-level timestamp
+	Category  string                   `json:"category"`  // service category identifier
+	SelfID    string                   `json:"self_id"`   // component ID
+	Part      int                      `json:"part"`      // pagination number
+	Data      []map[string]interface{} `json:"data"`      // current page logical cluster metering data
 }
 
 // MeteringWriter metering data writer
@@ -65,9 +64,6 @@ func (w *MeteringWriter) Write(ctx context.Context, data interface{}) error {
 	if err := utils.ValidateSelfID(meteringData.SelfID); err != nil {
 		return err
 	}
-	if err := utils.ValidatePhysicalClusterID(meteringData.PhysicalClusterID); err != nil {
-		return err
-	}
 	// Validate timestamp is minute-level
 	if err := utils.ValidateTimestamp(meteringData.Timestamp); err != nil {
 		return err
@@ -106,12 +102,11 @@ func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *
 		if len(currentPage) > 0 && currentSize+clusterSize > w.config.PageSizeBytes {
 			// Write current page
 			pageData := &pageMeteringData{
-				Timestamp:         meteringData.Timestamp,
-				Category:          meteringData.Category,
-				PhysicalClusterID: meteringData.PhysicalClusterID,
-				SelfID:            meteringData.SelfID,
-				Part:              pageNum,
-				Data:              currentPage,
+				Timestamp: meteringData.Timestamp,
+				Category:  meteringData.Category,
+				SelfID:    meteringData.SelfID,
+				Part:      pageNum,
+				Data:      currentPage,
 			}
 
 			if err := w.writePageData(ctx, pageData); err != nil {
@@ -132,12 +127,11 @@ func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *
 	// Write last page (if there is data)
 	if len(currentPage) > 0 {
 		pageData := &pageMeteringData{
-			Timestamp:         meteringData.Timestamp,
-			Category:          meteringData.Category,
-			PhysicalClusterID: meteringData.PhysicalClusterID,
-			SelfID:            meteringData.SelfID,
-			Part:              pageNum,
-			Data:              currentPage,
+			Timestamp: meteringData.Timestamp,
+			Category:  meteringData.Category,
+			SelfID:    meteringData.SelfID,
+			Part:      pageNum,
+			Data:      currentPage,
 		}
 
 		if err := w.writePageData(ctx, pageData); err != nil {
@@ -156,12 +150,11 @@ func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *
 // writeSinglePage writes a single page of data (no pagination)
 func (w *MeteringWriter) writeSinglePage(ctx context.Context, meteringData *common.MeteringData) error {
 	pageData := &pageMeteringData{
-		Timestamp:         meteringData.Timestamp,
-		Category:          meteringData.Category,
-		PhysicalClusterID: meteringData.PhysicalClusterID,
-		SelfID:            meteringData.SelfID,
-		Part:              0,
-		Data:              meteringData.Data,
+		Timestamp: meteringData.Timestamp,
+		Category:  meteringData.Category,
+		SelfID:    meteringData.SelfID,
+		Part:      0,
+		Data:      meteringData.Data,
 	}
 
 	return w.writePageData(ctx, pageData)
@@ -169,11 +162,10 @@ func (w *MeteringWriter) writeSinglePage(ctx context.Context, meteringData *comm
 
 // writePageData writes page data
 func (w *MeteringWriter) writePageData(ctx context.Context, pageData *pageMeteringData) error {
-	// Build S3 path: /metering/ru/{timestamp}/{category}/{physical_cluster_id}-{self_id}-{part}.json.gz
-	path := fmt.Sprintf("metering/ru/%d/%s/%s-%s-%d.json.gz",
+	// Build path: /metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
+	path := fmt.Sprintf("metering/ru/%d/%s/%s-%d.json.gz",
 		pageData.Timestamp,
 		pageData.Category,
-		pageData.PhysicalClusterID,
 		pageData.SelfID,
 		pageData.Part,
 	)

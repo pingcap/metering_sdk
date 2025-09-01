@@ -26,10 +26,9 @@ func TestMeteringDataValidation(t *testing.T) {
 		{
 			name: "valid metering data",
 			data: &common.MeteringData{
-				Timestamp:         time.Now().Unix() / 60 * 60,
-				Category:          "tidbserver",
-				PhysicalClusterID: "cluster123",
-				SelfID:            "server001",
+				Timestamp: time.Now().Unix() / 60 * 60,
+				Category:  "tidbserver",
+				SelfID:    "server001",
 				Data: []map[string]interface{}{
 					{
 						"logical_cluster_id": "lc-001",
@@ -48,26 +47,18 @@ func TestMeteringDataValidation(t *testing.T) {
 		{
 			name: "invalid timestamp",
 			data: &common.MeteringData{
-				Timestamp:         123, // not minute-level
-				Category:          "tidbserver",
-				PhysicalClusterID: "cluster123",
-				SelfID:            "server001",
-				Data: []map[string]interface{}{
-					{
-						"logical_cluster_id": "lc-001",
-						"cpu":                &common.MeteringValue{Value: 80, Unit: "percent"},
-					},
-				},
+				Timestamp: time.Now().Unix() + 3600, // not minute-level timestamp
+				Category:  "tidbserver",
+				SelfID:    "server001",
 			},
 			expectError: true,
 		},
 		{
-			name: "true timestamp",
+			name: "valid minute-level timestamp",
 			data: &common.MeteringData{
-				Timestamp:         1755808320, // Thu Aug 21 2025 20:32:00 GMT+0000 minute-level
-				Category:          "tidbserver",
-				PhysicalClusterID: "cluster123",
-				SelfID:            "server001",
+				Timestamp: 1756709700, // valid minute-level timestamp
+				Category:  "tidbserver",
+				SelfID:    "server001",
 				Data: []map[string]interface{}{
 					{
 						"logical_cluster_id": "lc-001",
@@ -120,52 +111,6 @@ func TestMetaDataValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := utils.ValidateClusterID(tt.data.ClusterID)
-			if tt.expectError {
-				assert.Error(t, err, "expected error but got none")
-			} else {
-				assert.NoError(t, err, "unexpected error")
-			}
-		})
-	}
-}
-
-// TestValidatePhysicalClusterID tests physical cluster ID validation functionality
-func TestValidatePhysicalClusterID(t *testing.T) {
-	tests := []struct {
-		name              string
-		physicalClusterID string
-		expectError       bool
-	}{
-		{
-			name:              "valid physical cluster ID without dash",
-			physicalClusterID: "cluster123",
-			expectError:       false,
-		},
-		{
-			name:              "physical cluster ID with dash",
-			physicalClusterID: "cluster-123",
-			expectError:       true,
-		},
-		{
-			name:              "empty physical cluster ID",
-			physicalClusterID: "",
-			expectError:       true,
-		},
-		{
-			name:              "physical cluster ID with special characters",
-			physicalClusterID: "cluster@123",
-			expectError:       false, // Only checks for dash and empty, not other special chars
-		},
-		{
-			name:              "physical cluster ID with underscore",
-			physicalClusterID: "cluster_123",
-			expectError:       false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := utils.ValidatePhysicalClusterID(tt.physicalClusterID)
 			if tt.expectError {
 				assert.Error(t, err, "expected error but got none")
 			} else {
@@ -295,10 +240,9 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 	// Test multiple writes
 	testData := []*common.MeteringData{
 		{
-			Timestamp:         time.Now().Unix() / 60 * 60,
-			Category:          "tidbserver",
-			PhysicalClusterID: "cluster123",
-			SelfID:            "server001",
+			Timestamp: time.Now().Unix() / 60 * 60,
+			Category:  "tidbserver",
+			SelfID:    "server001",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id": "lc-001",
@@ -313,10 +257,9 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 			},
 		},
 		{
-			Timestamp:         time.Now().Unix()/60*60 + 60,
-			Category:          "tidbserver",
-			PhysicalClusterID: "cluster123",
-			SelfID:            "server002",
+			Timestamp: time.Now().Unix()/60*60 + 60,
+			Category:  "tidbserver",
+			SelfID:    "server002",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id": "lc-003",
@@ -326,10 +269,9 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 			},
 		},
 		{
-			Timestamp:         time.Now().Unix()/60*60 + 120,
-			Category:          "pdserver",
-			PhysicalClusterID: "cluster456",
-			SelfID:            "pd001",
+			Timestamp: time.Now().Unix()/60*60 + 120,
+			Category:  "pdserver",
+			SelfID:    "pd001",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id": "lc-004",
@@ -351,10 +293,9 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 			assert.NoError(t, err, "Write failed")
 
 			// Verify data is correctly uploaded (default part=0, since no pagination is set)
-			expectedPath := fmt.Sprintf("metering/ru/%d/%s/%s-%s-%d.json.gz",
+			expectedPath := fmt.Sprintf("metering/ru/%d/%s/%s-%d.json.gz",
 				data.Timestamp,
 				data.Category,
-				data.PhysicalClusterID,
 				data.SelfID,
 				0, // default part number
 			)
@@ -365,12 +306,11 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 			// Verify correctness of compressed data
 			// Note: data is now wrapped in pageMeteringData structure
 			expectedPageData := &pageMeteringData{
-				Timestamp:         data.Timestamp,
-				Category:          data.Category,
-				PhysicalClusterID: data.PhysicalClusterID,
-				SelfID:            data.SelfID,
-				Part:              0,
-				Data:              data.Data,
+				Timestamp: data.Timestamp,
+				Category:  data.Category,
+				SelfID:    data.SelfID,
+				Part:      0,
+				Data:      data.Data,
 			}
 			expectedJSON, _ := json.Marshal(expectedPageData)
 			decompressAndVerify(t, uploadedData, expectedJSON)
@@ -395,10 +335,9 @@ func TestMeteringWriterConcurrency(t *testing.T) {
 		go func(routineID int) {
 			for j := 0; j < numWrites; j++ {
 				data := &common.MeteringData{
-					Timestamp:         time.Now().Unix() / 60 * 60,
-					Category:          "tidbserver",
-					PhysicalClusterID: fmt.Sprintf("cluster%d", routineID),
-					SelfID:            fmt.Sprintf("server%d%d", routineID, j),
+					Timestamp: time.Now().Unix() / 60 * 60,
+					Category:  "tidbserver",
+					SelfID:    fmt.Sprintf("server%d%d", routineID, j),
 					Data: []map[string]interface{}{
 						{
 							"logical_cluster_id": fmt.Sprintf("lc-%d", routineID*100+j),
@@ -435,10 +374,9 @@ func TestMeteringWriterPagination(t *testing.T) {
 
 		ctx := context.Background()
 		testData := &common.MeteringData{
-			Timestamp:         time.Now().Unix() / 60 * 60,
-			Category:          "tidbserver",
-			PhysicalClusterID: "clustertest",
-			SelfID:            "server001",
+			Timestamp: time.Now().Unix() / 60 * 60,
+			Category:  "tidbserver",
+			SelfID:    "server001",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id": "lc-001",
@@ -467,7 +405,7 @@ func TestMeteringWriterPagination(t *testing.T) {
 		// Check file path format
 		found := false
 		for path := range mockProvider.uploadedData {
-			if strings.Contains(path, testData.Category) && strings.Contains(path, testData.PhysicalClusterID) {
+			if strings.Contains(path, testData.Category) && strings.Contains(path, testData.SelfID) {
 				found = true
 				break
 			}
@@ -495,11 +433,10 @@ func TestMeteringWriterPagination(t *testing.T) {
 		}
 
 		testData := &common.MeteringData{
-			Timestamp:         time.Now().Unix() / 60 * 60,
-			Category:          "tidbserver",
-			PhysicalClusterID: "clusterpagination",
-			SelfID:            "server001",
-			Data:              largeData,
+			Timestamp: time.Now().Unix() / 60 * 60,
+			Category:  "tidbserver",
+			SelfID:    "server001",
+			Data:      largeData,
 		}
 
 		err := meteringWriter.Write(ctx, testData)
@@ -511,7 +448,7 @@ func TestMeteringWriterPagination(t *testing.T) {
 		// Verify all file path formats
 		for path := range mockProvider.uploadedData {
 			assert.Contains(t, path, testData.Category, "File path should contain category: %s", path)
-			assert.Contains(t, path, testData.PhysicalClusterID, "File path should contain physical cluster ID: %s", path)
+			assert.Contains(t, path, testData.SelfID, "File path should contain self ID: %s", path)
 			assert.Contains(t, path, ".json.gz", "File path should end with .json.gz: %s", path)
 		}
 
@@ -526,10 +463,9 @@ func TestMeteringWriterPagination(t *testing.T) {
 
 		ctx := context.Background()
 		testData := &common.MeteringData{
-			Timestamp:         time.Now().Unix() / 60 * 60,
-			Category:          "pdserver",
-			PhysicalClusterID: "clustersmall",
-			SelfID:            "pd001",
+			Timestamp: time.Now().Unix() / 60 * 60,
+			Category:  "pdserver",
+			SelfID:    "pd001",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id": "lc-001",

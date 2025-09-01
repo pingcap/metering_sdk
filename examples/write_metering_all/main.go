@@ -47,10 +47,9 @@ func main() {
 	// Write multiple metering data entries
 	meteringDataList := []*common.MeteringData{
 		{
-			PhysicalClusterID: "cluster001",         // Remove dash to pass validation
-			SelfID:            "tidbserver01",       // Remove dash to pass validation
-			Timestamp:         now.Unix() / 60 * 60, // Ensure minute-level timestamp
-			Category:          "tidb-server",
+			SelfID:    "tidbserver01xbp",    // Remove dash to pass validation
+			Timestamp: now.Unix() / 60 * 60, // Ensure minute-level timestamp
+			Category:  "tidb-server",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id": "lc-prod-001",
@@ -67,10 +66,9 @@ func main() {
 			},
 		},
 		{
-			PhysicalClusterID: "cluster002",         // Remove dash to pass validation
-			SelfID:            "tikvserver01",       // Remove dash to pass validation
-			Timestamp:         now.Unix() / 60 * 60, // Ensure minute-level timestamp
-			Category:          "tikv-server",
+			SelfID:    "tikvserver01dfp",    // Remove dash to pass validation
+			Timestamp: now.Unix() / 60 * 60, // Ensure minute-level timestamp
+			Category:  "tikv-server",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id":  "lc-test-001",
@@ -81,10 +79,9 @@ func main() {
 			},
 		},
 		{
-			PhysicalClusterID: "cluster003",         // Remove dash to pass validation
-			SelfID:            "pdserver01",         // Remove dash to pass validation
-			Timestamp:         now.Unix() / 60 * 60, // Ensure minute-level timestamp
-			Category:          "pd-server",
+			SelfID:    "pdserver01dxaw",     // Remove dash to pass validation
+			Timestamp: now.Unix() / 60 * 60, // Ensure minute-level timestamp
+			Category:  "pd-server",
 			Data: []map[string]interface{}{
 				{
 					"logical_cluster_id": "lc-staging-001",
@@ -119,10 +116,9 @@ func main() {
 	defer meteringWriter2.Close()
 
 	data := common.MeteringData{
-		PhysicalClusterID: "cluster004",         // Remove dash to pass validation
-		SelfID:            "tidbserver01",       // Remove dash to pass validation
-		Timestamp:         now.Unix() / 60 * 60, // Ensure minute-level timestamp
-		Category:          "tidb-server",
+		SelfID:    "tidbserver01",       // Remove dash to pass validation
+		Timestamp: now.Unix() / 60 * 60, // Ensure minute-level timestamp
+		Category:  "tidb-server",
 		Data: []map[string]interface{}{
 			{
 				"logical_cluster_id": "lc-prod-001",
