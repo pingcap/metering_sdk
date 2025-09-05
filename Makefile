@@ -2,6 +2,11 @@
 
 .PHONY: help build test clean fmt vet lint install-deps
 
+PACKAGE_LIST  := go list ./...| grep -vE "test|docs|proto|examples"
+PACKAGES  ?= $$($(PACKAGE_LIST))
+GOLANGCI_LINT_VERSION ?= v2.4.0
+TEST_DIR := /tmp/metering_sdk_test
+
 # Default target
 help:
 	@echo "Available commands:"
@@ -36,8 +41,9 @@ vet:
 
 # Code linting
 lint:
-	@echo "Running golangci-lint..."
-	golangci-lint run
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	golangci-lint run --fix -v $$($(PACKAGES)) --config .golangci.yml
+	git diff --exit-code
 
 # Clean
 clean:
@@ -66,3 +72,25 @@ update:
 	@echo "Updating dependencies..."
 	go get -u ./...
 	go mod tidy
+
+# CI unit test
+.PHONY: ci_ut
+ci_ut: add_ut_file vendor ## UT for CI, do not run locally, run `make ut` instead.
+	go install github.com/axw/gocov/gocov@latest
+	go install github.com/jstemmer/go-junit-report@latest
+	go install github.com/AlekSi/gocov-xml@latest
+	go install gotest.tools/gotestsum@latest
+	@-(gotestsum --junitfile ./unit-tests.xml --packages=${PACKAGES})
+	-go test -v ${PACKAGES} -coverprofile=cover.out
+	gocov convert cover.out | gocov-xml > coverage.xml
+
+# Unit test
+.PHONY: ut
+ut:
+	mkdir -p "$(TEST_DIR)"
+	go install gotest.tools/gotestsum@latest
+	@-(gotestsum --junitfile "$(TEST_DIR)/unit-tests.xml" --packages=${PACKAGES})
+	-go test -v ${PACKAGES} -coverprofile="$(TEST_DIR)/cover.out"
+	go tool cover -html "$(TEST_DIR)/cover.out" -o "$(TEST_DIR)/cover.html"
+	@echo "check ut results in $(TEST_DIR)/unit-tests.xml"
+	@echo "check ut coverage by opening $(TEST_DIR)/cover.html using browser"

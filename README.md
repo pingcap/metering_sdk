@@ -61,7 +61,6 @@ func main() {
     // Create metering data
     now := time.Now()
     meteringData := &common.MeteringData{
-        PhysicalClusterID: "cluster001",    // Note: No dashes allowed
         SelfID:            "tidbserver01",  // Note: No dashes allowed
         Timestamp:         now.Unix() / 60 * 60, // Must be minute-level
         Category:          "tidb-server",
@@ -523,7 +522,6 @@ cfg := config.DefaultConfig().
 
 ### Important ID Requirements
 
-- **PhysicalClusterID**: Cannot contain dashes (`-`)
 - **SelfID**: Cannot contain dashes (`-`)
 - **Timestamp**: Must be minute-level (divisible by 60)
 
@@ -531,11 +529,9 @@ cfg := config.DefaultConfig().
 
 ```go
 // ✅ Valid IDs
-PhysicalClusterID: "cluster001"
 SelfID:            "tidbserver01"
 
 // ❌ Invalid IDs (contain dashes)
-PhysicalClusterID: "cluster-001"
 SelfID:            "tidb-server-01"
 ```
 
@@ -544,13 +540,13 @@ SelfID:            "tidb-server-01"
 The SDK organizes files in the following structure:
 
 ```
-/metering/ru/{timestamp}/{category}/{physical_cluster_id}-{self_id}-{part}.json.gz
+/metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
 /metering/meta/{cluster_id}/{modify_ts}.json.gz
 ```
 
 Example:
 ```
-/metering/ru/1755850380/tidb-server/cluster001-tidbserver01-0.json.gz
+/metering/ru/1755850380/tidb-server/tidbserver01-0.json.gz
 /metering/meta/cluster001/1755850419.json.gz
 ```
 

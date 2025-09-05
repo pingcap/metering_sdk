@@ -54,16 +54,18 @@ func main() {
 	// Generate many logical clusters to exceed page size
 	largeDataSet := make([]map[string]interface{}, 0, 20)
 	for i := 0; i < 20; i++ {
+		// #nosec G115 - i is bounded by loop condition (0-19), safe for uint64 conversion
+		idx := uint64(i)
 		logicalCluster := map[string]interface{}{
 			"logical_cluster_id": fmt.Sprintf("lc-large-%03d", i+1),
-			"compute_seconds":    &common.MeteringValue{Value: uint64(3600 + i*100), Unit: "seconds"},
-			"memory_mb":          &common.MeteringValue{Value: uint64(4096 + i*512), Unit: "MB"},
-			"storage_gb":         &common.MeteringValue{Value: uint64(100 + i*10), Unit: "GB"},
-			"network_in_bytes":   &common.MeteringValue{Value: uint64(1073741824 + i*104857600), Unit: "bytes"},
-			"network_out_bytes":  &common.MeteringValue{Value: uint64(536870912 + i*52428800), Unit: "bytes"},
-			"disk_read_iops":     &common.MeteringValue{Value: uint64(1000 + i*50), Unit: "iops"},
-			"disk_write_iops":    &common.MeteringValue{Value: uint64(800 + i*40), Unit: "iops"},
-			"cpu_utilization":    &common.MeteringValue{Value: uint64(750 + i*10), Unit: "permille"}, // 75% + variations
+			"compute_seconds":    &common.MeteringValue{Value: uint64(3600) + idx*100, Unit: "seconds"},
+			"memory_mb":          &common.MeteringValue{Value: uint64(4096) + idx*512, Unit: "MB"},
+			"storage_gb":         &common.MeteringValue{Value: uint64(100) + idx*10, Unit: "GB"},
+			"network_in_bytes":   &common.MeteringValue{Value: uint64(1073741824) + idx*104857600, Unit: "bytes"},
+			"network_out_bytes":  &common.MeteringValue{Value: uint64(536870912) + idx*52428800, Unit: "bytes"},
+			"disk_read_iops":     &common.MeteringValue{Value: uint64(1000) + idx*50, Unit: "iops"},
+			"disk_write_iops":    &common.MeteringValue{Value: uint64(800) + idx*40, Unit: "iops"},
+			"cpu_utilization":    &common.MeteringValue{Value: uint64(750) + idx*10, Unit: "permille"}, // 75% + variations
 		}
 		largeDataSet = append(largeDataSet, logicalCluster)
 	}
@@ -90,13 +92,15 @@ func main() {
 
 	secondDataSet := make([]map[string]interface{}, 0, 15)
 	for i := 0; i < 15; i++ {
+		// #nosec G115 - i is bounded by loop condition (0-14), safe for uint64 conversion
+		idx := uint64(i)
 		logicalCluster := map[string]interface{}{
 			"logical_cluster_id":  fmt.Sprintf("lc-medium-%03d", i+1),
-			"storage_read_bytes":  &common.MeteringValue{Value: uint64(1073741824 + i*134217728), Unit: "bytes"},
-			"storage_write_bytes": &common.MeteringValue{Value: uint64(536870912 + i*67108864), Unit: "bytes"},
-			"cpu_usage_percent":   &common.MeteringValue{Value: uint64(600 + i*20), Unit: "permille"},
-			"request_count":       &common.MeteringValue{Value: uint64(10000 + i*500), Unit: "count"},
-			"error_count":         &common.MeteringValue{Value: uint64(10 + i), Unit: "count"},
+			"storage_read_bytes":  &common.MeteringValue{Value: uint64(1073741824) + idx*134217728, Unit: "bytes"},
+			"storage_write_bytes": &common.MeteringValue{Value: uint64(536870912) + idx*67108864, Unit: "bytes"},
+			"cpu_usage_percent":   &common.MeteringValue{Value: uint64(600) + idx*20, Unit: "permille"},
+			"request_count":       &common.MeteringValue{Value: uint64(10000) + idx*500, Unit: "count"},
+			"error_count":         &common.MeteringValue{Value: uint64(10) + idx, Unit: "count"},
 		}
 		secondDataSet = append(secondDataSet, logicalCluster)
 	}

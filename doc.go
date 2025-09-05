@@ -51,7 +51,6 @@
 //	    // Create metering data
 //	    now := time.Now()
 //	    meteringData := &common.MeteringData{
-//	        PhysicalClusterID: "cluster001",
 //	        SelfID:            "tidbserver01",
 //	        Timestamp:         now.Unix() / 60 * 60, // Minute-level timestamp
 //	        Category:          "tidb-server",

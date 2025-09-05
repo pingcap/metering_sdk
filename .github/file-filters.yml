@@ -1,0 +1,11 @@
+code-changes:
+  - '**/*.go'
+  - 'go.mod'
+  - '.golangci.yml'
+  - '.github/workflows/*.yml'
+  - '.github/workflows/*.yaml'
+  - 'Makefile'
+  - 'Makefile.common'
+  - 'Dockerfile'
+  - 'hack/*.sh'
+  - 'manifests/*.yaml'

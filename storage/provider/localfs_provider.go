@@ -63,7 +63,7 @@ func NewLocalFSProvider(config *ProviderConfig) (*LocalFSProvider, error) {
 func parseFileMode(perm string) (fs.FileMode, error) {
 	// Simple implementation supporting "0755" format
 	if strings.HasPrefix(perm, "0") {
-		var mode int
+		var mode uint32
 		_, err := fmt.Sscanf(perm, "%o", &mode)
 		if err != nil {
 			return 0755, err
