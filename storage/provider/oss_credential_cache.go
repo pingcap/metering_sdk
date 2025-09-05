@@ -77,20 +77,24 @@ func (c *CredentialCache) GetCredentials(ctx context.Context) (credentials.Crede
 		}
 		// if refreshing but has cache, return cached credentials
 		if cached != nil {
+			// Create local copy to avoid potential race condition
+			localCached := *cached
 			return credentials.Credentials{
-				AccessKeyID:     cached.AccessKeyID,
-				AccessKeySecret: cached.AccessKeySecret,
-				SecurityToken:   cached.SecurityToken,
+				AccessKeyID:     localCached.AccessKeyID,
+				AccessKeySecret: localCached.AccessKeySecret,
+				SecurityToken:   localCached.SecurityToken,
 			}, nil
 		}
 		// if refreshing and no cache, wait for refresh to complete
 		return c.waitForRefresh(ctx)
 	}
 
+	// Create local copy to avoid potential race condition
+	localCached := *cached
 	return credentials.Credentials{
-		AccessKeyID:     cached.AccessKeyID,
-		AccessKeySecret: cached.AccessKeySecret,
-		SecurityToken:   cached.SecurityToken,
+		AccessKeyID:     localCached.AccessKeyID,
+		AccessKeySecret: localCached.AccessKeySecret,
+		SecurityToken:   localCached.SecurityToken,
 	}, nil
 }
 
@@ -102,7 +106,6 @@ func (c *CredentialCache) needsRefresh(expiration time.Time) bool {
 // refreshCredentials fetches new credentials using assume role
 func (c *CredentialCache) refreshCredentials(ctx context.Context) (credentials.Credentials, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	// double check to prevent concurrent refresh
 	if c.refreshing {
@@ -111,8 +114,10 @@ func (c *CredentialCache) refreshCredentials(ctx context.Context) (credentials.C
 	}
 
 	c.refreshing = true
+	// defer unlock after setting refreshing flag
 	defer func() {
 		c.refreshing = false
+		c.mu.Unlock()
 	}()
 
 	// call STS AssumeRole API
@@ -180,10 +185,12 @@ func (c *CredentialCache) waitForRefresh(ctx context.Context) (credentials.Crede
 			c.mu.RUnlock()
 
 			if !refreshing && cached != nil {
+				// Create local copy to avoid potential race condition
+				localCached := *cached
 				return credentials.Credentials{
-					AccessKeyID:     cached.AccessKeyID,
-					AccessKeySecret: cached.AccessKeySecret,
-					SecurityToken:   cached.SecurityToken,
+					AccessKeyID:     localCached.AccessKeyID,
+					AccessKeySecret: localCached.AccessKeySecret,
+					SecurityToken:   localCached.SecurityToken,
 				}, nil
 			}
 		}
