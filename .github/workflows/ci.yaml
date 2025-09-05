@@ -1,0 +1,129 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches:
+      - 'main'
+      - 'release'
+# Concurrency ensures that only a single job or workflow using the same concurrency group will run at a time.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    if: ${{ !startsWith(github.head_ref, 'renovate/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: check for go file changes
+        uses: getsentry/paths-filter@v2
+        id: changes
+        with:
+          token: ${{ github.token }}
+          filters: .github/file-filters.yml
+
+      - name: configure git for private modules
+        if: steps.changes.outputs.code-changes == 'true'
+        env:
+          TOKEN: ${{ secrets.GIT_ACTION_BOT }}
+        run: git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/cache@v4
+        if: steps.changes.outputs.code-changes == 'true'
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: setup go
+        if: steps.changes.outputs.code-changes == 'true'
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.x"
+        env:
+          GOPRIVATE: "github.com/tidbcloud"
+
+      - name: golangci-lint
+        if: steps.changes.outputs.code-changes == 'true'
+        run: |
+          make lint
+
+  unit-test:
+    name: unit-test
+    if: ${{ !startsWith(github.head_ref, 'renovate/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: check for go file changes
+        uses: getsentry/paths-filter@v2
+        id: changes
+        with:
+          token: ${{ github.token }}
+          filters: .github/file-filters.yml
+
+      - name: configure git for private modules
+        if: steps.changes.outputs.code-changes == 'true'
+        env:
+          TOKEN: ${{ secrets.GIT_ACTION_BOT }}
+        run: git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/cache@v4
+        if: steps.changes.outputs.code-changes == 'true'
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: setup go
+        if: steps.changes.outputs.code-changes == 'true'
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.x"
+        env:
+          GOPRIVATE: "github.com/tidbcloud"
+
+      - name: details
+        if: steps.changes.outputs.code-changes == 'true'
+        run: |
+          make ci_ut
+
+      - name: publish test report
+        uses: dorny/test-reporter@v1
+        if: steps.changes.outputs.code-changes == 'true' && always()
+        with:
+          name: ut result
+          path: './unit-tests*.xml'
+          reporter: java-junit
+          fail-on-error: 'true'
+
+      - name: Code Coverage Summary Report
+        uses: irongut/CodeCoverageSummary@v1.2.0
+        if: steps.changes.outputs.code-changes == 'true' && always()
+        with:
+          filename: ./coverage.xml
+          badge: true
+          fail_below_min: true
+          format: markdown
+          hide_branch_rate: true
+          hide_complexity: true
+          indicators: true
+          output: both
+          thresholds: '5 90'
+
+      - name: Add Coverage PR Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request' && steps.changes.outputs.code-changes == 'true' && always()
+        with:
+          header: reporter
+          hide: true
+          path: code-coverage-results.md

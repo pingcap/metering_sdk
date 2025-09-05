@@ -43,23 +43,48 @@ func NewOSSProvider(providerConfig *ProviderConfig) (*OSSProvider, error) {
 		} else {
 			return nil, fmt.Errorf("invalid OSS config type, expected *oss.Config")
 		}
+
 	} else {
 		// Build configuration
 		cred, err := openapicred.NewCredential(nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default AliCloud credentials: %w", err)
 		}
-		provider := credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
-			cred, err := cred.GetCredential()
+
+		var provider credentials.CredentialsProvider
+
+		// Check if assume role is configured
+		if providerConfig.OSS != nil && providerConfig.OSS.AssumeRoleARN != "" {
+			// Create credential cache for assume role
+			credCache, err := NewCredentialCache(cred, providerConfig.OSS.AssumeRoleARN, providerConfig.Region)
 			if err != nil {
-				return credentials.Credentials{}, err
+				return nil, fmt.Errorf("failed to create credential cache: %w", err)
 			}
-			return credentials.Credentials{
-				AccessKeyID:     *cred.AccessKeyId,
-				AccessKeySecret: *cred.AccessKeySecret,
-				SecurityToken:   *cred.SecurityToken,
-			}, nil
-		})
+
+			// Start background refresh
+			ctx := context.Background()
+			credCache.StartBackgroundRefresh(ctx)
+
+			// Use cached credentials provider
+			provider = credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
+				return credCache.GetCredentials(ctx)
+			})
+		} else {
+			// Use direct credentials provider
+			provider = credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
+				cred, err := cred.GetCredential()
+				if err != nil {
+					return credentials.Credentials{}, err
+				}
+
+				return credentials.Credentials{
+					AccessKeyID:     *cred.AccessKeyId,
+					AccessKeySecret: *cred.AccessKeySecret,
+					SecurityToken:   *cred.SecurityToken,
+				}, nil
+			})
+		}
+
 		cfg = oss.LoadDefaultConfig().WithRegion(providerConfig.Region).WithCredentialsProvider(provider)
 
 		// Set endpoint if provided

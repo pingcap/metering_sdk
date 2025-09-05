@@ -8,7 +8,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 // S3Provider AWS S3 storage provider implementation
@@ -47,6 +49,9 @@ func NewS3Provider(providerConfig *ProviderConfig) (*S3Provider, error) {
 		}
 		if providerConfig.Endpoint != "" {
 			cfg.BaseEndpoint = aws.String(providerConfig.Endpoint)
+		}
+		if providerConfig.AWS != nil && providerConfig.AWS.AssumeRoleARN != "" {
+			cfg.Credentials = aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), providerConfig.AWS.AssumeRoleARN))
 		}
 	}
 
