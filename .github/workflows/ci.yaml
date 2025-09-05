@@ -97,14 +97,14 @@ jobs:
         run: |
           make ci_ut
 
-      - name: publish test report
-        uses: dorny/test-reporter@v1
-        if: steps.changes.outputs.code-changes == 'true' && always()
-        with:
-          name: ut result
-          path: './unit-tests*.xml'
-          reporter: java-junit
-          fail-on-error: 'true'
+      # - name: publish test report
+      #   uses: dorny/test-reporter@v1
+      #   if: steps.changes.outputs.code-changes == 'true' && always()
+      #   with:
+      #     name: ut result
+      #     path: './unit-tests*.xml'
+      #     reporter: java-junit
+      #     fail-on-error: 'true'
 
       - name: Code Coverage Summary Report
         uses: irongut/CodeCoverageSummary@v1.2.0
@@ -120,10 +120,10 @@ jobs:
           output: both
           thresholds: '5 90'
 
-      - name: Add Coverage PR Comment
-        uses: marocchino/sticky-pull-request-comment@v2
-        if: github.event_name == 'pull_request' && steps.changes.outputs.code-changes == 'true' && always()
-        with:
-          header: reporter
-          hide: true
-          path: code-coverage-results.md
+      # - name: Add Coverage PR Comment
+      #   uses: marocchino/sticky-pull-request-comment@v2
+      #   if: github.event_name == 'pull_request' && steps.changes.outputs.code-changes == 'true' && always()
+      #   with:
+      #     header: reporter
+      #     hide: true
+      #     path: code-coverage-results.md

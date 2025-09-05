@@ -75,7 +75,7 @@ update:
 
 # CI unit test
 .PHONY: ci_ut
-ci_ut: add_ut_file vendor ## UT for CI, do not run locally, run `make ut` instead.
+ci_ut: ## UT for CI, do not run locally, run `make ut` instead.
 	go install github.com/axw/gocov/gocov@latest
 	go install github.com/jstemmer/go-junit-report@latest
 	go install github.com/AlekSi/gocov-xml@latest
