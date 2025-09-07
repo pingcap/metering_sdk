@@ -11,9 +11,9 @@ import (
 
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
-	"github.com/pingcap/metering_sdk/storage"
 	metareader "github.com/pingcap/metering_sdk/reader/meta"
 	meteringreader "github.com/pingcap/metering_sdk/reader/metering"
+	"github.com/pingcap/metering_sdk/storage"
 	metawriter "github.com/pingcap/metering_sdk/writer/meta"
 	meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
 	"github.com/stretchr/testify/assert"
@@ -474,7 +474,7 @@ func TestMeteringReaderWithLocalFS(t *testing.T) {
 		for i, dataEntry := range readData.Data {
 			originalEntry := testData.Data[i]
 			assert.Equal(t, originalEntry["logical_cluster"], dataEntry["logical_cluster"], "Logical cluster mismatch")
-			
+
 			// Check metering values
 			if originalCPU, ok := originalEntry["cpu_usage"].(*common.MeteringValue); ok {
 				if readCPU, ok := dataEntry["cpu_usage"].(map[string]interface{}); ok {
@@ -494,7 +494,7 @@ func TestMeteringReaderWithLocalFS(t *testing.T) {
 		firstStorageFile := storageFiles[0]
 		readInterface, err := meteringReader.Read(context.Background(), firstStorageFile)
 		assert.NoError(t, err, "Failed to read file via interface %s", firstStorageFile)
-		
+
 		readData, ok := readInterface.(*common.MeteringData)
 		assert.True(t, ok, "Read interface should return *common.MeteringData")
 		assert.Equal(t, testTimestamp, readData.Timestamp, "Interface read data timestamp mismatch")
@@ -516,7 +516,7 @@ func TestMeteringReaderWithLocalFS(t *testing.T) {
 	_, err = meteringReader.GetFileInfo("invalid/path")
 	assert.Error(t, err, "Should error for invalid file path")
 
-	t.Logf("Metering reader test passed. Files found: compute=%d, storage=%d", 
+	t.Logf("Metering reader test passed. Files found: compute=%d, storage=%d",
 		len(computeFiles), len(storageFiles))
 }
 
@@ -571,7 +571,7 @@ func TestMeteringReadWriteRoundtripWithLocalFS(t *testing.T) {
 				{
 					"logical_cluster": "production",
 					"disk_size":       &common.MeteringValue{Value: 1000, Unit: "GB"},
-					"iops":           &common.MeteringValue{Value: 5000, Unit: "ops/s"},
+					"iops":            &common.MeteringValue{Value: 5000, Unit: "ops/s"},
 				},
 			},
 		},
@@ -751,7 +751,7 @@ func TestMetaReaderWithLocalFS(t *testing.T) {
 	metaReader, err := metareader.NewMetaReader(provider, cfg, nil)
 	assert.NoError(t, err, "Failed to create meta reader")
 
-	// Test Read - read metadata by cluster ID and timestamp  
+	// Test Read - read metadata by cluster ID and timestamp
 	firstMeta, err := metaReader.Read(context.Background(), testClusterID, testTimestamp)
 	assert.NoError(t, err, "Failed to read metadata by timestamp")
 	assert.NotNil(t, firstMeta, "First metadata should not be nil")
@@ -791,6 +791,6 @@ func TestMetaReaderWithLocalFS(t *testing.T) {
 	_, err = metaReader.ReadFile(context.Background(), "metering/meta/non-existent/999999.json.gz")
 	assert.Error(t, err, "Should error when reading non-existent file")
 
-	t.Logf("Meta reader test passed. Cluster: %s, Timestamps: [%d, %d]", 
+	t.Logf("Meta reader test passed. Cluster: %s, Timestamps: [%d, %d]",
 		testClusterID, testTimestamp, testTimestamp+60)
 }

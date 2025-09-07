@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -61,20 +62,11 @@ func NewLocalFSProvider(config *ProviderConfig) (*LocalFSProvider, error) {
 
 // parseFileMode parses file permission string
 func parseFileMode(perm string) (fs.FileMode, error) {
-	// Simple implementation supporting "0755" format
-	if strings.HasPrefix(perm, "0") {
-		var mode uint32
-		n, err := fmt.Sscanf(perm, "%o", &mode)
+	// Support "0755" format (octal with leading zero)
+	if strings.HasPrefix(perm, "0") && len(perm) > 1 {
+		// Parse as octal number (base 8), strconv.ParseUint handles validation
+		mode, err := strconv.ParseUint(perm, 8, 32)
 		if err != nil {
-			return 0755, err
-		}
-		if n != 1 {
-			return 0755, fmt.Errorf("invalid octal format: %s", perm)
-		}
-		// Additional validation: check if the entire string was consumed
-		// by attempting to parse it again and comparing lengths
-		expectedStr := fmt.Sprintf("%o", mode)
-		if "0"+expectedStr != perm {
 			return 0755, fmt.Errorf("invalid octal format: %s", perm)
 		}
 		return fs.FileMode(mode), nil
