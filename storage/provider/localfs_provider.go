@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -61,12 +62,12 @@ func NewLocalFSProvider(config *ProviderConfig) (*LocalFSProvider, error) {
 
 // parseFileMode parses file permission string
 func parseFileMode(perm string) (fs.FileMode, error) {
-	// Simple implementation supporting "0755" format
-	if strings.HasPrefix(perm, "0") {
-		var mode uint32
-		_, err := fmt.Sscanf(perm, "%o", &mode)
+	// Support "0755" format (octal with leading zero)
+	if strings.HasPrefix(perm, "0") && len(perm) > 1 {
+		// Parse as octal number (base 8), strconv.ParseUint handles validation
+		mode, err := strconv.ParseUint(perm, 8, 32)
 		if err != nil {
-			return 0755, err
+			return 0755, fmt.Errorf("invalid octal format: %s", perm)
 		}
 		return fs.FileMode(mode), nil
 	}
@@ -167,12 +168,24 @@ func (l *LocalFSProvider) Exists(ctx context.Context, path string) (bool, error)
 // List implements ObjectStorageProvider interface
 func (l *LocalFSProvider) List(ctx context.Context, prefix string) ([]string, error) {
 	var files []string
-	prefixPath := l.buildPath(prefix)
 
-	// If prefix path doesn't exist, return empty list
-	if _, err := os.Stat(prefixPath); os.IsNotExist(err) {
-		return files, nil
+	// Build the expected prefix path, which should be relative to basePath
+	var expectedPrefix string
+	if l.prefix != "" {
+		// Combine provider prefix and requested prefix
+		providerPrefix := strings.TrimSuffix(l.prefix, string(filepath.Separator))
+		requestedPrefix := strings.TrimPrefix(prefix, string(filepath.Separator))
+		if requestedPrefix != "" {
+			expectedPrefix = providerPrefix + string(filepath.Separator) + requestedPrefix
+		} else {
+			expectedPrefix = providerPrefix
+		}
+	} else {
+		expectedPrefix = prefix
 	}
+
+	// Normalize expected prefix to use forward slashes for comparison
+	expectedPrefix = strings.ReplaceAll(expectedPrefix, string(filepath.Separator), "/")
 
 	err := filepath.WalkDir(l.basePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -190,10 +203,11 @@ func (l *LocalFSProvider) List(ctx context.Context, prefix string) ([]string, er
 			return err
 		}
 
+		// Normalize path to use forward slashes for consistent comparison
+		normalizedPath := strings.ReplaceAll(relPath, string(filepath.Separator), "/")
+
 		// Check if matches prefix
-		if strings.HasPrefix(relPath, prefix) {
-			// Use forward slash as path separator consistently, same as cloud storage
-			normalizedPath := strings.ReplaceAll(relPath, string(filepath.Separator), "/")
+		if expectedPrefix == "" || strings.HasPrefix(normalizedPath, expectedPrefix) {
 			files = append(files, normalizedPath)
 		}
 
