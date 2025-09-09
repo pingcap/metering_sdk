@@ -50,8 +50,14 @@ func (w *MetaWriter) Write(ctx context.Context, data interface{}) error {
 		return fmt.Errorf("invalid data type, expected *MetaData")
 	}
 
-	// Build S3 path: /metering/meta/{cluster_id}/{modify_ts}.json.gz
-	path := fmt.Sprintf("metering/meta/%s/%d.json.gz",
+	// Validate metadata type
+	if !common.ValidMetaTypes[metaData.Type] {
+		return fmt.Errorf("invalid metadata type: %s, must be one of: logic, sharedpool", metaData.Type)
+	}
+
+	// Build S3 path: /metering/meta/{type}/{cluster_id}/{modify_ts}.json.gz
+	path := fmt.Sprintf("metering/meta/%s/%s/%d.json.gz",
+		metaData.Type,
 		metaData.ClusterID,
 		metaData.ModifyTS,
 	)
@@ -59,6 +65,7 @@ func (w *MetaWriter) Write(ctx context.Context, data interface{}) error {
 	w.logger.Debug("Writing meta data",
 		zap.String("path", path),
 		zap.String("cluster_id", metaData.ClusterID),
+		zap.String("type", string(metaData.Type)),
 		zap.Int64("modify_ts", metaData.ModifyTS),
 	)
 

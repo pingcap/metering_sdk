@@ -19,6 +19,8 @@ var (
 type MetaReader interface {
 	// Read reads the latest metadata for the specified cluster at or before the given timestamp
 	Read(ctx context.Context, clusterID string, timestamp int64) (*common.MetaData, error)
+	// ReadByType reads the latest metadata for the specified cluster and type at or before the given timestamp
+	ReadByType(ctx context.Context, clusterID string, metaType common.MetaType, timestamp int64) (*common.MetaData, error)
 	// ReadFile reads metadata file from the specified path
 	ReadFile(ctx context.Context, path string) (interface{}, error)
 	// List lists all metadata file paths under the specified prefix

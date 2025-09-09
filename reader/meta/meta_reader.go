@@ -115,6 +115,67 @@ func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64
 	return metaData, nil
 }
 
+// ReadByType reads the latest metadata for the specified cluster and type at or before the specified timestamp
+func (r *MetaReader) ReadByType(ctx context.Context, clusterID string, metaType common.MetaType, timestamp int64) (*common.MetaData, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Validate metadata type
+	if !common.ValidMetaTypes[metaType] {
+		return nil, fmt.Errorf("invalid metadata type: %s, must be one of: logic, sharedpool", metaType)
+	}
+
+	r.logger.Debug("Reading latest meta data for cluster by type",
+		zap.String("cluster_id", clusterID),
+		zap.String("type", string(metaType)),
+		zap.Int64("timestamp", timestamp),
+	)
+
+	// Use type-specific cache key
+	cacheKey := fmt.Sprintf("meta:%s:%s:%d", string(metaType), clusterID, timestamp)
+	if r.cache != nil {
+		if cached, found := r.cache.Get(cacheKey); found {
+			if metaData, ok := cached.(*common.MetaData); ok {
+				r.logger.Debug("Meta data cache hit",
+					zap.String("cluster_id", clusterID),
+					zap.String("type", string(metaType)),
+					zap.Int64("timestamp", timestamp),
+					zap.Int64("actual_timestamp", metaData.ModifyTS),
+				)
+				return metaData, nil
+			}
+		}
+	}
+
+	// Cache miss, get from storage
+	metaData, err := r.readLatestFromStorageByType(ctx, clusterID, metaType, timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	if r.cache != nil && metaData != nil {
+		if err := r.cache.Set(cacheKey, metaData); err != nil {
+			r.logger.Warn("Failed to cache meta data",
+				zap.String("cluster_id", clusterID),
+				zap.String("type", string(metaType)),
+				zap.Int64("request_timestamp", timestamp),
+				zap.Int64("actual_timestamp", metaData.ModifyTS),
+				zap.Error(err),
+			)
+		} else {
+			r.logger.Debug("Meta data cached",
+				zap.String("cluster_id", clusterID),
+				zap.String("type", string(metaType)),
+				zap.Int64("request_timestamp", timestamp),
+				zap.Int64("actual_timestamp", metaData.ModifyTS),
+			)
+		}
+	}
+
+	return metaData, nil
+}
+
 // ReadFile reads metadata file at the specified path (original functionality preserved)
 func (r *MetaReader) ReadFile(ctx context.Context, path string) (interface{}, error) {
 	r.mu.RLock()
@@ -216,6 +277,67 @@ func (r *MetaReader) readLatestFromStorage(ctx context.Context, clusterID string
 	}
 	//add more information
 	metaData.ClusterID = clusterID
+	metaData.ModifyTS = latestTimestamp
+	return metaData, nil
+}
+
+// readLatestFromStorageByType reads the latest metadata from storage by type
+func (r *MetaReader) readLatestFromStorageByType(ctx context.Context, clusterID string, metaType common.MetaType, timestamp int64) (*common.MetaData, error) {
+	// Build prefix path with type: /metering/meta/{type}/{cluster_id}/
+	prefix := fmt.Sprintf("metering/meta/%s/%s/", string(metaType), clusterID)
+
+	// List all files
+	files, err := r.provider.List(ctx, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list files: %w", err)
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("%w: no meta files found for cluster %s with type %s", reader.ErrFileNotFound, clusterID, metaType)
+	}
+
+	// Find the latest file with timestamp not greater than the specified time
+	var latestFile string
+	var latestTimestamp int64 = -1
+
+	for _, file := range files {
+		// Parse timestamp from filename
+		fileTimestamp, err := r.extractTimestampFromFilename(file)
+		if err != nil {
+			r.logger.Debug("Failed to extract timestamp from filename",
+				zap.String("file", file),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		// Check if timestamp condition is met and update
+		if fileTimestamp <= timestamp && fileTimestamp > latestTimestamp {
+			latestTimestamp = fileTimestamp
+			latestFile = file
+		}
+	}
+
+	if latestFile == "" {
+		return nil, fmt.Errorf("%w: no meta files found for cluster %s with type %s before timestamp %d",
+			reader.ErrFileNotFound, clusterID, metaType, timestamp)
+	}
+
+	// Read file content
+	data, err := r.ReadFile(ctx, latestFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read meta file %s: %w", latestFile, err)
+	}
+
+	// Type assertion
+	metaData, ok := data.(*common.MetaData)
+	if !ok {
+		return nil, fmt.Errorf("invalid data type from file %s", latestFile)
+	}
+
+	// Ensure the metadata has the correct information
+	metaData.ClusterID = clusterID
+	metaData.Type = metaType
 	metaData.ModifyTS = latestTimestamp
 	return metaData, nil
 }

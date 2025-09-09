@@ -92,6 +92,7 @@ func TestMetaReader_Read(t *testing.T) {
 	// Create test data
 	testData := common.MetaData{
 		ClusterID: "cluster-123",
+		Type:      common.MetaTypeLogic,
 		ModifyTS:  1755687660,
 		Metadata: map[string]interface{}{
 			"version": "1.0",
@@ -102,7 +103,7 @@ func TestMetaReader_Read(t *testing.T) {
 	compressedData, err := createCompressedTestData(testData)
 	assert.NoError(t, err, "Failed to create test data")
 
-	path := "metering/meta/cluster-123/1755687660.json.gz"
+	path := "metering/meta/logic/cluster-123/1755687660.json.gz"
 	provider.files[path] = compressedData
 
 	cfg := &config.Config{
@@ -515,4 +516,129 @@ func TestMetaReader_CacheKeyLogic(t *testing.T) {
 	for _, key := range keys {
 		assert.True(t, expectedKeys[key], "Unexpected cache key: %s", key)
 	}
+}
+
+// TestMetaReader_ReadByType tests the new ReadByType functionality
+func TestMetaReader_ReadByType(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+
+	// Prepare test data for different types
+	logicData := &common.MetaData{
+		ClusterID: "test-cluster",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  1000,
+		Metadata: map[string]interface{}{
+			"name":    "test-cluster-logic",
+			"version": "1.0.0",
+		},
+	}
+
+	sharedpoolData := &common.MetaData{
+		ClusterID: "test-cluster",
+		Type:      common.MetaTypeSharedpool,
+		ModifyTS:  1000,
+		Metadata: map[string]interface{}{
+			"name":    "test-cluster-sharedpool",
+			"version": "1.0.0",
+		},
+	}
+
+	// Create compressed data
+	compressedLogicData, err := createCompressedTestData(logicData)
+	assert.NoError(t, err, "Failed to create logic test data")
+
+	compressedSharedpoolData, err := createCompressedTestData(sharedpoolData)
+	assert.NoError(t, err, "Failed to create sharedpool test data")
+
+	// Set file paths with type structure
+	provider.files["metering/meta/logic/test-cluster/1000.json.gz"] = compressedLogicData
+	provider.files["metering/meta/sharedpool/test-cluster/1000.json.gz"] = compressedSharedpoolData
+
+	cfg := &config.Config{
+		Logger: zap.NewNop(),
+	}
+
+	metaReader, err := NewMetaReader(provider, cfg, nil)
+	assert.NoError(t, err, "Failed to create MetaReader")
+
+	ctx := context.Background()
+
+	// Test reading logic type
+	t.Run("read logic type", func(t *testing.T) {
+		result, err := metaReader.ReadByType(ctx, "test-cluster", common.MetaTypeLogic, 1500)
+		assert.NoError(t, err, "ReadByType logic failed")
+		assert.Equal(t, common.MetaTypeLogic, result.Type, "Expected logic type")
+		assert.Equal(t, "test-cluster-logic", result.Metadata["name"].(string))
+	})
+
+	// Test reading sharedpool type
+	t.Run("read sharedpool type", func(t *testing.T) {
+		result, err := metaReader.ReadByType(ctx, "test-cluster", common.MetaTypeSharedpool, 1500)
+		assert.NoError(t, err, "ReadByType sharedpool failed")
+		assert.Equal(t, common.MetaTypeSharedpool, result.Type, "Expected sharedpool type")
+		assert.Equal(t, "test-cluster-sharedpool", result.Metadata["name"].(string))
+	})
+
+	// Test invalid type
+	t.Run("invalid type", func(t *testing.T) {
+		_, err := metaReader.ReadByType(ctx, "test-cluster", "invalid", 1500)
+		assert.Error(t, err, "Invalid type should cause error")
+		assert.Contains(t, err.Error(), "invalid metadata type", "Error should mention invalid type")
+	})
+
+	// Test type not found
+	t.Run("type not found", func(t *testing.T) {
+		_, err := metaReader.ReadByType(ctx, "nonexistent-cluster", common.MetaTypeLogic, 1500)
+		assert.Error(t, err, "Nonexistent cluster should cause error")
+		assert.Contains(t, err.Error(), "file not found", "Error should mention file not found")
+	})
+}
+
+// TestMetaReader_ReadByTypeWithCache tests ReadByType with caching
+func TestMetaReader_ReadByTypeWithCache(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+
+	// Prepare test data
+	testData := &common.MetaData{
+		ClusterID: "cache-test-cluster",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  2000,
+		Metadata: map[string]interface{}{
+			"name":    "cache-test-logic",
+			"version": "2.0.0",
+		},
+	}
+
+	compressedData, err := createCompressedTestData(testData)
+	assert.NoError(t, err, "Failed to create test data")
+
+	provider.files["metering/meta/logic/cache-test-cluster/2000.json.gz"] = compressedData
+
+	// Create cache config
+	cacheConfig := &Config{
+		Cache: &cache.Config{
+			Type:    cache.CacheTypeMemory,
+			MaxSize: 100 * 1024 * 1024,
+		},
+	}
+
+	cfg := &config.Config{
+		Logger: zap.NewNop(),
+	}
+
+	metaReader, err := NewMetaReader(provider, cfg, cacheConfig)
+	assert.NoError(t, err, "Failed to create MetaReader")
+
+	ctx := context.Background()
+
+	// First read - should hit storage
+	result1, err := metaReader.ReadByType(ctx, "cache-test-cluster", common.MetaTypeLogic, 2500)
+	assert.NoError(t, err, "First read failed")
+	assert.Equal(t, "cache-test-logic", result1.Metadata["name"].(string))
+
+	// Second read with same parameters - should hit cache
+	result2, err := metaReader.ReadByType(ctx, "cache-test-cluster", common.MetaTypeLogic, 2500)
+	assert.NoError(t, err, "Second read failed")
+	assert.Equal(t, "cache-test-logic", result2.Metadata["name"].(string))
+	assert.Equal(t, result1.ModifyTS, result2.ModifyTS, "Cache should return same result")
 }

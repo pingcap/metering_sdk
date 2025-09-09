@@ -44,6 +44,7 @@ func main() {
 	now := time.Now()
 	metaData := &common.MetaData{
 		ClusterID: "137008900123",
+		Type:      common.MetaTypeLogic,
 		ModifyTS:  now.Unix(),
 		Metadata: map[string]interface{}{
 			"env":   "dev",
@@ -63,6 +64,7 @@ func main() {
 	// Write another meta data
 	metaData2 := &common.MetaData{
 		ClusterID: "137008900124",
+		Type:      common.MetaTypeSharedpool,
 		ModifyTS:  now.Unix(),
 		Metadata: map[string]interface{}{
 			"env":   "dev",
