@@ -86,16 +86,19 @@ func TestMetaWriterGzipReuse(t *testing.T) {
 	testData := []*common.MetaData{
 		{
 			ClusterID: "cluster-123",
+			Type:      common.MetaTypeLogic,
 			ModifyTS:  time.Now().Unix(),
 			Metadata:  map[string]interface{}{"region": "us-west-2", "version": "v5.4.0"},
 		},
 		{
 			ClusterID: "cluster-456",
+			Type:      common.MetaTypeSharedpool,
 			ModifyTS:  time.Now().Unix() + 60,
 			Metadata:  map[string]interface{}{"region": "us-east-1", "version": "v6.0.0"},
 		},
 		{
 			ClusterID: "cluster-789",
+			Type:      common.MetaTypeLogic,
 			ModifyTS:  time.Now().Unix() + 120,
 			Metadata:  map[string]interface{}{"region": "eu-west-1", "version": "v6.1.0"},
 		},
@@ -107,11 +110,11 @@ func TestMetaWriterGzipReuse(t *testing.T) {
 			assert.NoError(t, err, "Write failed")
 
 			// Verify data is correctly uploaded
-			expectedPath := fmt.Sprintf("metering/meta/%s/%d.json.gz",
+			expectedPath := fmt.Sprintf("metering/meta/%s/%s/%d.json.gz",
+				string(data.Type),
 				data.ClusterID,
 				data.ModifyTS,
 			)
-
 			uploadedData, exists := mockProvider.uploadedData[expectedPath]
 			assert.True(t, exists, "Expected data not found at path: %s", expectedPath)
 
@@ -138,8 +141,13 @@ func TestMetaWriterConcurrency(t *testing.T) {
 	for i := 0; i < numRoutines; i++ {
 		go func(routineID int) {
 			for j := 0; j < numWrites; j++ {
+				metaType := common.MetaTypeLogic
+				if routineID%2 == 0 {
+					metaType = common.MetaTypeSharedpool
+				}
 				data := &common.MetaData{
 					ClusterID: fmt.Sprintf("cluster%d", routineID),
+					Type:      metaType,
 					ModifyTS:  time.Now().Unix() + int64(routineID*numWrites+j),
 					Metadata:  map[string]interface{}{"routine": routineID, "write": j},
 				}
@@ -174,6 +182,7 @@ func TestMetaWriterFileExistsCheck(t *testing.T) {
 		ctx := context.Background()
 		testData := &common.MetaData{
 			ClusterID: "cluster-123",
+			Type:      common.MetaTypeLogic,
 			ModifyTS:  time.Now().Unix(),
 			Metadata:  map[string]interface{}{"region": "us-west-2"},
 		}
@@ -199,6 +208,7 @@ func TestMetaWriterFileExistsCheck(t *testing.T) {
 		ctx := context.Background()
 		testData := &common.MetaData{
 			ClusterID: "cluster-456",
+			Type:      common.MetaTypeSharedpool,
 			ModifyTS:  time.Now().Unix(),
 			Metadata:  map[string]interface{}{"region": "us-west-2"},
 		}
@@ -222,6 +232,7 @@ func TestMetaWriterFileExistsCheck(t *testing.T) {
 		ctx := context.Background()
 		testData := &common.MetaData{
 			ClusterID: "cluster-789",
+			Type:      common.MetaTypeLogic,
 			ModifyTS:  time.Now().Unix(),
 			Metadata:  map[string]interface{}{"region": "eu-west-1"},
 		}
@@ -234,5 +245,64 @@ func TestMetaWriterFileExistsCheck(t *testing.T) {
 		err = metaWriter.Write(ctx, testData)
 		assert.Error(t, err, "Second write should fail with default config")
 		assert.ErrorIs(t, err, writer.ErrFileExists, "Expected ErrFileExists")
+	})
+}
+
+// TestMetaTypeValidation tests metadata type validation
+func TestMetaTypeValidation(t *testing.T) {
+	mockProvider := NewMockStorageProvider()
+	cfg := config.NewDebugConfig()
+	metaWriter := NewMetaWriter(mockProvider, cfg)
+	defer metaWriter.Close()
+
+	ctx := context.Background()
+
+	t.Run("valid logic type", func(t *testing.T) {
+		testData := &common.MetaData{
+			ClusterID: "test-cluster",
+			Type:      common.MetaTypeLogic,
+			ModifyTS:  time.Now().Unix(),
+			Metadata:  map[string]interface{}{"test": "data"},
+		}
+
+		err := metaWriter.Write(ctx, testData)
+		assert.NoError(t, err, "Logic type should be valid")
+	})
+
+	t.Run("valid sharedpool type", func(t *testing.T) {
+		testData := &common.MetaData{
+			ClusterID: "test-cluster",
+			Type:      common.MetaTypeSharedpool,
+			ModifyTS:  time.Now().Unix() + 1,
+			Metadata:  map[string]interface{}{"test": "data"},
+		}
+
+		err := metaWriter.Write(ctx, testData)
+		assert.NoError(t, err, "Sharedpool type should be valid")
+	})
+
+	t.Run("invalid type", func(t *testing.T) {
+		testData := &common.MetaData{
+			ClusterID: "test-cluster",
+			Type:      "invalid-type",
+			ModifyTS:  time.Now().Unix() + 2,
+			Metadata:  map[string]interface{}{"test": "data"},
+		}
+
+		err := metaWriter.Write(ctx, testData)
+		assert.Error(t, err, "Invalid type should cause error")
+		assert.Contains(t, err.Error(), "invalid metadata type", "Error should mention invalid type")
+	})
+
+	t.Run("empty type", func(t *testing.T) {
+		testData := &common.MetaData{
+			ClusterID: "test-cluster",
+			Type:      "",
+			ModifyTS:  time.Now().Unix() + 3,
+			Metadata:  map[string]interface{}{"test": "data"},
+		}
+
+		err := metaWriter.Write(ctx, testData)
+		assert.Error(t, err, "Empty type should cause error")
 	})
 }

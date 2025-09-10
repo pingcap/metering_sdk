@@ -122,7 +122,7 @@
 //
 // # Writing Meta Data
 //
-// This example shows how to write cluster metadata.
+// This example shows how to write cluster metadata with different types.
 //
 //	package main
 //
@@ -159,23 +159,115 @@
 //	    writer := metawriter.NewMetaWriter(provider, cfg)
 //	    defer writer.Close()
 //
-//	    // Create meta data
-//	    metaData := &common.MetaData{
+//	    // Create logic cluster meta data
+//	    logicMetaData := &common.MetaData{
 //	        ClusterID: "cluster001",
+//	        Type:      common.MetaTypeLogic,  // Logic cluster type
 //	        ModifyTS:  time.Now().Unix(),
 //	        Metadata: map[string]interface{}{
-//	            "env":     "production",
-//	            "owner":   "team-database",
-//	            "region":  "us-west-2",
+//	            "env":        "production",
+//	            "owner":      "team-database",
+//	            "region":     "us-west-2",
+//	            "cluster_type": "logic",
 //	        },
 //	    }
 //
-//	    // Write meta data
-//	    ctx := context.Background()
-//	    if err := writer.Write(ctx, metaData); err != nil {
-//	        log.Fatalf("Failed to write meta data: %v", err)
+//	    // Create shared pool meta data
+//	    sharedpoolMetaData := &common.MetaData{
+//	        ClusterID: "cluster001",
+//	        Type:      common.MetaTypeSharedpool,  // Shared pool type
+//	        ModifyTS:  time.Now().Unix(),
+//	        Metadata: map[string]interface{}{
+//	            "env":        "production",
+//	            "owner":      "team-database",
+//	            "region":     "us-west-2",
+//	            "pool_size":  100,
+//	        },
 //	    }
 //
-//	    fmt.Println("Meta data written successfully!")
+//	    ctx := context.Background()
+//
+//	    // Write logic meta data
+//	    if err := writer.Write(ctx, logicMetaData); err != nil {
+//	        log.Fatalf("Failed to write logic meta data: %v", err)
+//	    }
+//	    fmt.Println("Logic meta data written successfully!")
+//
+//	    // Write shared pool meta data
+//	    if err := writer.Write(ctx, sharedpoolMetaData); err != nil {
+//	        log.Fatalf("Failed to write sharedpool meta data: %v", err)
+//	    }
+//	    fmt.Println("Sharedpool meta data written successfully!")
+//	}
+//
+// # Reading Meta Data by Type
+//
+// This example shows how to read cluster metadata by specific type.
+//
+//	package main
+//
+//	import (
+//	    "context"
+//	    "fmt"
+//	    "log"
+//	    "time"
+//
+//	    "github.com/pingcap/metering_sdk/common"
+//	    "github.com/pingcap/metering_sdk/config"
+//	    "github.com/pingcap/metering_sdk/storage"
+//	    metareader "github.com/pingcap/metering_sdk/reader/meta"
+//	)
+//
+//	func main() {
+//	    // Create storage provider (same as writer example)
+//	    localConfig := &storage.ProviderConfig{
+//	        Type: storage.ProviderTypeLocalFS,
+//	        LocalFS: &storage.LocalFSConfig{
+//	            BasePath: "/tmp/metering-data",
+//	        },
+//	    }
+//
+//	    provider, err := storage.NewObjectStorageProvider(localConfig)
+//	    if err != nil {
+//	        log.Fatalf("Failed to create storage provider: %v", err)
+//	    }
+//
+//	    // Create meta reader with cache
+//	    cfg := config.DefaultConfig()
+//	    readerCfg := &metareader.Config{
+//	        Cache: &cache.Config{
+//	            Type:    cache.CacheTypeMemory,
+//	            MaxSize: 100 * 1024 * 1024, // 100MB
+//	        },
+//	    }
+//	    reader, err := metareader.NewMetaReader(provider, cfg, readerCfg)
+//	    if err != nil {
+//	        log.Fatalf("Failed to create meta reader: %v", err)
+//	    }
+//	    defer reader.Close()
+//
+//	    ctx := context.Background()
+//	    timestamp := time.Now().Unix()
+//
+//	    // Read logic cluster metadata
+//	    logicMeta, err := reader.ReadByType(ctx, "cluster001", common.MetaTypeLogic, timestamp)
+//	    if err != nil {
+//	        log.Fatalf("Failed to read logic meta data: %v", err)
+//	    }
+//	    fmt.Printf("Logic meta data: %+v\n", logicMeta)
+//
+//	    // Read shared pool metadata
+//	    sharedpoolMeta, err := reader.ReadByType(ctx, "cluster001", common.MetaTypeSharedpool, timestamp)
+//	    if err != nil {
+//	        log.Fatalf("Failed to read sharedpool meta data: %v", err)
+//	    }
+//	    fmt.Printf("Sharedpool meta data: %+v\n", sharedpoolMeta)
+//
+//	    // Read latest metadata (any type) - backward compatibility
+//	    latestMeta, err := reader.Read(ctx, "cluster001", timestamp)
+//	    if err != nil {
+//	        log.Fatalf("Failed to read meta data: %v", err)
+//	    }
+//	    fmt.Printf("Latest meta data: %+v\n", latestMeta)
 //	}
 package sdk

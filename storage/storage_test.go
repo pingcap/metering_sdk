@@ -152,6 +152,7 @@ func TestMetaWriterWithLocalFS(t *testing.T) {
 	now := time.Now()
 	testData := &common.MetaData{
 		ClusterID: "test-cluster",
+		Type:      common.MetaTypeLogic,
 		ModifyTS:  now.Unix(),
 		Metadata: map[string]interface{}{
 			"test_field": "test_value",
@@ -163,7 +164,7 @@ func TestMetaWriterWithLocalFS(t *testing.T) {
 	assert.NoError(t, err, "Failed to write meta data")
 
 	// Verify file is created
-	expectedPath := filepath.Join(tempDir, "metering", "meta", testData.ClusterID,
+	expectedPath := filepath.Join(tempDir, "metering", "meta", string(testData.Type), testData.ClusterID,
 		fmt.Sprintf("%d.json.gz", testData.ModifyTS))
 
 	_, err = os.Stat(expectedPath)
@@ -717,6 +718,7 @@ func TestMetaReaderWithLocalFS(t *testing.T) {
 	testTimestamp := time.Now().Unix()
 	testMetadata := &common.MetaData{
 		ClusterID: testClusterID,
+		Type:      common.MetaTypeLogic,
 		ModifyTS:  testTimestamp,
 		Metadata: map[string]interface{}{
 			"version":      "v6.5.0",
@@ -734,6 +736,7 @@ func TestMetaReaderWithLocalFS(t *testing.T) {
 	// Write another metadata with different timestamp
 	testMetadata2 := &common.MetaData{
 		ClusterID: testClusterID,
+		Type:      common.MetaTypeSharedpool,
 		ModifyTS:  testTimestamp + 60, // 1 minute later
 		Metadata: map[string]interface{}{
 			"version":      "v6.5.1",
@@ -752,7 +755,7 @@ func TestMetaReaderWithLocalFS(t *testing.T) {
 	assert.NoError(t, err, "Failed to create meta reader")
 
 	// Test Read - read metadata by cluster ID and timestamp
-	firstMeta, err := metaReader.Read(context.Background(), testClusterID, testTimestamp)
+	firstMeta, err := metaReader.ReadByType(context.Background(), testClusterID, common.MetaTypeLogic, testTimestamp)
 	assert.NoError(t, err, "Failed to read metadata by timestamp")
 	assert.NotNil(t, firstMeta, "First metadata should not be nil")
 	assert.Equal(t, testClusterID, firstMeta.ClusterID, "Cluster ID mismatch")
@@ -761,7 +764,7 @@ func TestMetaReaderWithLocalFS(t *testing.T) {
 	assert.Equal(t, float64(5), firstMeta.Metadata["node_count"], "Node count should be the first one")
 
 	// Test Read with second timestamp
-	secondMeta, err := metaReader.Read(context.Background(), testClusterID, testTimestamp+60)
+	secondMeta, err := metaReader.ReadByType(context.Background(), testClusterID, common.MetaTypeSharedpool, testTimestamp+60)
 	assert.NoError(t, err, "Failed to read second metadata")
 	assert.NotNil(t, secondMeta, "Second metadata should not be nil")
 	assert.Equal(t, testClusterID, secondMeta.ClusterID, "Cluster ID mismatch")
@@ -770,7 +773,7 @@ func TestMetaReaderWithLocalFS(t *testing.T) {
 	assert.Equal(t, float64(6), secondMeta.Metadata["node_count"], "Node count should be the second one")
 
 	// Test ReadFile (interface method)
-	expectedPath := fmt.Sprintf("metering/meta/%s/%d.json.gz", testClusterID, testTimestamp)
+	expectedPath := fmt.Sprintf("metering/meta/%s/%s/%d.json.gz", string(common.MetaTypeLogic), testClusterID, testTimestamp)
 	readInterface, err := metaReader.ReadFile(context.Background(), expectedPath)
 	assert.NoError(t, err, "Failed to read via ReadFile")
 	readMeta, ok := readInterface.(*common.MetaData)

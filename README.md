@@ -148,24 +148,122 @@ func main() {
     writer := metawriter.NewMetaWriter(provider, cfg)
     defer writer.Close()
 
-    // Create meta data
-    metaData := &common.MetaData{
+    // Create logic cluster meta data
+    logicMetaData := &common.MetaData{
         ClusterID: "cluster001",
+        Type:      common.MetaTypeLogic,     // Specify metadata type
         ModifyTS:  time.Now().Unix(),
         Metadata: map[string]interface{}{
-            "env":     "production",
-            "owner":   "team-database",
-            "region":  "us-west-2",
+            "env":          "production",
+            "owner":        "team-database",
+            "region":       "us-west-2",
+            "cluster_type": "logic",
         },
     }
 
-    // Write meta data
-    ctx := context.Background()
-    if err := writer.Write(ctx, metaData); err != nil {
-        log.Fatalf("Failed to write meta data: %v", err)
+    // Create shared pool meta data
+    sharedpoolMetaData := &common.MetaData{
+        ClusterID: "cluster001",
+        Type:      common.MetaTypeSharedpool, // Specify metadata type
+        ModifyTS:  time.Now().Unix(),
+        Metadata: map[string]interface{}{
+            "env":       "production",
+            "owner":     "team-database",
+            "region":    "us-west-2",
+            "pool_size": 100,
+        },
     }
 
-    fmt.Println("Meta data written successfully!")
+    ctx := context.Background()
+    
+    // Write logic meta data
+    if err := writer.Write(ctx, logicMetaData); err != nil {
+        log.Fatalf("Failed to write logic meta data: %v", err)
+    }
+    fmt.Println("Logic meta data written successfully!")
+
+    // Write shared pool meta data
+    if err := writer.Write(ctx, sharedpoolMetaData); err != nil {
+        log.Fatalf("Failed to write sharedpool meta data: %v", err)
+    }
+    fmt.Println("Sharedpool meta data written successfully!")
+}
+```
+
+### Reading Metadata by Type
+
+The SDK now supports reading metadata by specific type (logic or sharedpool):
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/pingcap/metering_sdk/common"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/internal/cache"
+    metareader "github.com/pingcap/metering_sdk/reader/meta"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Create storage provider (same configuration as writer)
+    s3Config := &storage.ProviderConfig{
+        Type:   storage.ProviderTypeS3,
+        Bucket: "your-bucket-name",
+        Region: "us-west-2",
+        Prefix: "metering-data",
+    }
+
+    provider, err := storage.NewObjectStorageProvider(s3Config)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    // Create meta reader with cache
+    cfg := config.DefaultConfig()
+    readerCfg := &metareader.Config{
+        Cache: &cache.Config{
+            Type:    cache.CacheTypeMemory,
+            MaxSize: 100 * 1024 * 1024, // 100MB
+        },
+    }
+    reader, err := metareader.NewMetaReader(provider, cfg, readerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create meta reader: %v", err)
+    }
+    defer reader.Close()
+
+    ctx := context.Background()
+    timestamp := time.Now().Unix()
+
+    // Read logic cluster metadata
+    logicMeta, err := reader.ReadByType(ctx, "cluster001", common.MetaTypeLogic, timestamp)
+    if err != nil {
+        log.Printf("Failed to read logic meta data: %v", err)
+    } else {
+        fmt.Printf("Logic meta data: %+v\n", logicMeta)
+    }
+
+    // Read shared pool metadata
+    sharedpoolMeta, err := reader.ReadByType(ctx, "cluster001", common.MetaTypeSharedpool, timestamp)
+    if err != nil {
+        log.Printf("Failed to read sharedpool meta data: %v", err)
+    } else {
+        fmt.Printf("Sharedpool meta data: %+v\n", sharedpoolMeta)
+    }
+
+    // Read latest metadata (any type) - backward compatibility
+    latestMeta, err := reader.Read(ctx, "cluster001", timestamp)
+    if err != nil {
+        log.Printf("Failed to read meta data: %v", err)
+    } else {
+        fmt.Printf("Latest meta data: %+v\n", latestMeta)
+    }
 }
 ```
 
@@ -244,6 +342,217 @@ func main() {
             fmt.Printf("Logical clusters: %d\n", len(meteringData.Data))
         }
     }
+}
+```
+
+## High-Level Configuration
+
+The SDK provides a high-level configuration structure `MeteringConfig` that simplifies setup and supports multiple configuration formats (YAML, JSON, TOML).
+
+### Programmatic Configuration
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+    metawriter "github.com/pingcap/metering_sdk/writer/meta"
+)
+
+func main() {
+    // Create high-level configuration
+    meteringCfg := config.NewMeteringConfig().
+        WithS3("us-west-2", "my-bucket").
+        WithPrefix("metering-data").
+        WithSharedPoolID("shared-pool-001")
+
+    // Convert to storage provider config
+    providerCfg := meteringCfg.ToProviderConfig()
+    
+    // Create storage provider
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    // Use with writers/readers
+    cfg := config.DefaultConfig()
+    writer := metawriter.NewMetaWriter(provider, cfg)
+    defer writer.Close()
+
+    // Write metadata with shared pool ID
+    ctx := context.Background()
+    sharedPoolID := meteringCfg.GetSharedPoolID()
+    
+    // ... use sharedPoolID in your logic
+    fmt.Printf("Using shared pool ID: %s\n", sharedPoolID)
+}
+```
+
+### Configuration from YAML
+
+Create a `config.yaml` file:
+
+```yaml
+type: s3
+region: us-west-2
+bucket: my-bucket
+prefix: metering-data
+shared-pool-id: shared-pool-001
+aws:
+  assume-role-arn: arn:aws:iam::123456789012:role/MeteringRole
+  s3-force-path-style: false
+```
+
+Load and use the configuration:
+
+```go
+package main
+
+import (
+    "os"
+    "gopkg.in/yaml.v3"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Read YAML file
+    data, err := os.ReadFile("config.yaml")
+    if err != nil {
+        log.Fatalf("Failed to read config file: %v", err)
+    }
+
+    // Parse YAML
+    var meteringCfg config.MeteringConfig
+    err = yaml.Unmarshal(data, &meteringCfg)
+    if err != nil {
+        log.Fatalf("Failed to parse config: %v", err)
+    }
+
+    // Create storage provider
+    providerCfg := meteringCfg.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    fmt.Printf("Configuration loaded successfully!\n")
+    fmt.Printf("Shared Pool ID: %s\n", meteringCfg.GetSharedPoolID())
+}
+```
+
+### Configuration from JSON
+
+Create a `config.json` file:
+
+```json
+{
+  "type": "oss",
+  "region": "oss-cn-hangzhou",
+  "bucket": "my-bucket",
+  "prefix": "metering-data",
+  "shared-pool-id": "shared-pool-002",
+  "oss": {
+    "assume-role-arn": "acs:ram::123456789012:role/MeteringRole"
+  }
+}
+```
+
+Load and use the configuration:
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "os"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Read JSON file
+    data, err := os.ReadFile("config.json")
+    if err != nil {
+        log.Fatalf("Failed to read config file: %v", err)
+    }
+
+    // Parse JSON
+    var meteringCfg config.MeteringConfig
+    err = json.Unmarshal(data, &meteringCfg)
+    if err != nil {
+        log.Fatalf("Failed to parse config: %v", err)
+    }
+
+    // Create storage provider
+    providerCfg := meteringCfg.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    fmt.Printf("Configuration loaded successfully!\n")
+    fmt.Printf("Shared Pool ID: %s\n", meteringCfg.GetSharedPoolID())
+}
+```
+
+### Configuration from TOML
+
+Create a `config.toml` file:
+
+```toml
+type = "localfs"
+prefix = "metering-data"
+shared-pool-id = "shared-pool-003"
+
+[localfs]
+base-path = "/tmp/metering-data"
+create-dirs = true
+permissions = "0755"
+```
+
+Load and use the configuration:
+
+```go
+package main
+
+import (
+    "os"
+    "github.com/BurntSushi/toml"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Read TOML file
+    data, err := os.ReadFile("config.toml")
+    if err != nil {
+        log.Fatalf("Failed to read config file: %v", err)
+    }
+
+    // Parse TOML
+    var meteringCfg config.MeteringConfig
+    err = toml.Unmarshal(data, &meteringCfg)
+    if err != nil {
+        log.Fatalf("Failed to parse config: %v", err)
+    }
+
+    // Create storage provider
+    providerCfg := meteringCfg.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    fmt.Printf("Configuration loaded successfully!\n")
+    fmt.Printf("Shared Pool ID: %s\n", meteringCfg.GetSharedPoolID())
 }
 ```
 
@@ -541,13 +850,18 @@ The SDK organizes files in the following structure:
 
 ```
 /metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
-/metering/meta/{cluster_id}/{modify_ts}.json.gz
+/metering/meta/{type}/{cluster_id}/{modify_ts}.json.gz
 ```
+
+Where `{type}` can be:
+- `logic` - Logic cluster metadata
+- `sharedpool` - Shared pool metadata
 
 Example:
 ```
 /metering/ru/1755850380/tidb-server/tidbserver01-0.json.gz
-/metering/meta/cluster001/1755850419.json.gz
+/metering/meta/logic/cluster001/1755850419.json.gz
+/metering/meta/sharedpool/cluster001/1755850419.json.gz
 ```
 
 ## Examples

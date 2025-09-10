@@ -1,0 +1,10 @@
+{
+  "type": "oss",
+  "region": "oss-cn-hangzhou",
+  "bucket": "test-bucket", 
+  "prefix": "oss-prefix",
+  "oss": {
+    "assume-role-arn": "acs:ram::123456789012:role/TestRole"
+  },
+  "shared-pool-id": "shared-pool-002"
+}

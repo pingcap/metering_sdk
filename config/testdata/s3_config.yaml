@@ -1,0 +1,7 @@
+type: s3
+region: us-west-2
+bucket: test-bucket
+prefix: test-prefix
+aws:
+  assume-role-arn: arn:aws:iam::123456789012:role/TestRole
+shared-pool-id: shared-pool-001

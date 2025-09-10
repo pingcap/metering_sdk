@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/pingcap/metering_sdk/storage"
 	"go.uber.org/zap"
 )
 
@@ -114,4 +115,198 @@ func (c *Config) WithPageSize(sizeBytes int64) *Config {
 func (c *Config) WithPageSizeMB(sizeMB int64) *Config {
 	c.PageSizeBytes = sizeMB * 1024 * 1024
 	return c
+}
+
+// MeteringAWSConfig AWS S3 specific configuration for high-level config
+type MeteringAWSConfig struct {
+	AssumeRoleARN    string `yaml:"assume-role-arn,omitempty" toml:"assume-role-arn,omitempty" json:"assume-role-arn,omitempty" reloadable:"false"`
+	S3ForcePathStyle bool   `yaml:"s3-force-path-style,omitempty" toml:"s3-force-path-style,omitempty" json:"s3-force-path-style,omitempty" reloadable:"false"`
+}
+
+// MeteringOSSConfig Alibaba Cloud OSS specific configuration for high-level config
+type MeteringOSSConfig struct {
+	AssumeRoleARN string `yaml:"assume-role-arn,omitempty" toml:"assume-role-arn,omitempty" json:"assume-role-arn,omitempty" reloadable:"false"`
+}
+
+// MeteringLocalFSConfig local filesystem specific configuration for high-level config
+type MeteringLocalFSConfig struct {
+	BasePath    string `yaml:"base-path,omitempty" toml:"base-path,omitempty" json:"base-path,omitempty" reloadable:"false"`
+	CreateDirs  bool   `yaml:"create-dirs,omitempty" toml:"create-dirs,omitempty" json:"create-dirs,omitempty" reloadable:"false"`
+	Permissions string `yaml:"permissions,omitempty" toml:"permissions,omitempty" json:"permissions,omitempty" reloadable:"false"`
+}
+
+// MeteringConfig represents a high-level configuration for metering SDK
+// It combines storage provider configuration with business-specific settings
+type MeteringConfig struct {
+	// Storage provider type: s3, oss, localfs, etc.
+	Type storage.ProviderType `yaml:"type,omitempty" toml:"type,omitempty" json:"type,omitempty" reloadable:"false"`
+	// Storage region
+	Region string `yaml:"region,omitempty" toml:"region,omitempty" json:"region,omitempty" reloadable:"false"`
+	// Storage bucket/container name
+	Bucket string `yaml:"bucket,omitempty" toml:"bucket,omitempty" json:"bucket,omitempty" reloadable:"false"`
+	// Path prefix for all stored files
+	Prefix string `yaml:"prefix,omitempty" toml:"prefix,omitempty" json:"prefix,omitempty" reloadable:"false"`
+	// Custom endpoint for S3-compatible services
+	Endpoint string `yaml:"endpoint,omitempty" toml:"endpoint,omitempty" json:"endpoint,omitempty" reloadable:"false"`
+
+	// Cloud-specific configurations
+	AWS     *MeteringAWSConfig     `yaml:"aws,omitempty" toml:"aws,omitempty" json:"aws,omitempty" reloadable:"false"`
+	OSS     *MeteringOSSConfig     `yaml:"oss,omitempty" toml:"oss,omitempty" json:"oss,omitempty" reloadable:"false"`
+	LocalFS *MeteringLocalFSConfig `yaml:"localfs,omitempty" toml:"localfs,omitempty" json:"localfs,omitempty" reloadable:"false"`
+
+	// Business-specific configurations
+	// Shared pool cluster ID for sharedpool type metadata
+	SharedPoolID string `yaml:"shared-pool-id,omitempty" toml:"shared-pool-id,omitempty" json:"shared-pool-id,omitempty" reloadable:"false"`
+}
+
+// ToProviderConfig converts MeteringConfig to storage.ProviderConfig
+func (mc *MeteringConfig) ToProviderConfig() *storage.ProviderConfig {
+	config := &storage.ProviderConfig{
+		Type:     mc.Type,
+		Region:   mc.Region,
+		Bucket:   mc.Bucket,
+		Prefix:   mc.Prefix,
+		Endpoint: mc.Endpoint,
+	}
+
+	switch mc.Type {
+	case storage.ProviderTypeS3:
+		if mc.AWS != nil {
+			config.AWS = &storage.AWSConfig{
+				AssumeRoleARN:    mc.AWS.AssumeRoleARN,
+				S3ForcePathStyle: mc.AWS.S3ForcePathStyle,
+			}
+		}
+	case storage.ProviderTypeOSS:
+		if mc.OSS != nil {
+			config.OSS = &storage.OSSConfig{
+				AssumeRoleARN: mc.OSS.AssumeRoleARN,
+			}
+		}
+	case storage.ProviderTypeLocalFS:
+		if mc.LocalFS != nil {
+			config.LocalFS = &storage.LocalFSConfig{
+				BasePath:    mc.LocalFS.BasePath,
+				CreateDirs:  mc.LocalFS.CreateDirs,
+				Permissions: mc.LocalFS.Permissions,
+			}
+		}
+	}
+
+	return config
+}
+
+// NewMeteringConfig creates a new MeteringConfig with default values
+func NewMeteringConfig() *MeteringConfig {
+	return &MeteringConfig{}
+}
+
+// WithS3 configures for AWS S3 storage
+func (mc *MeteringConfig) WithS3(region, bucket string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeS3
+	mc.Region = region
+	mc.Bucket = bucket
+	return mc
+}
+
+// WithS3AssumeRole configures for AWS S3 storage with assume role
+func (mc *MeteringConfig) WithS3AssumeRole(region, bucket, roleARN string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeS3
+	mc.Region = region
+	mc.Bucket = bucket
+	if mc.AWS == nil {
+		mc.AWS = &MeteringAWSConfig{}
+	}
+	mc.AWS.AssumeRoleARN = roleARN
+	return mc
+}
+
+// WithOSS configures for Alibaba Cloud OSS storage
+func (mc *MeteringConfig) WithOSS(region, bucket string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeOSS
+	mc.Region = region
+	mc.Bucket = bucket
+	return mc
+}
+
+// WithOSSAssumeRole configures for Alibaba Cloud OSS storage with assume role
+func (mc *MeteringConfig) WithOSSAssumeRole(region, bucket, roleARN string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeOSS
+	mc.Region = region
+	mc.Bucket = bucket
+	if mc.OSS == nil {
+		mc.OSS = &MeteringOSSConfig{}
+	}
+	mc.OSS.AssumeRoleARN = roleARN
+	return mc
+}
+
+// WithLocalFS configures for local filesystem storage
+func (mc *MeteringConfig) WithLocalFS(basePath string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeLocalFS
+	if mc.LocalFS == nil {
+		mc.LocalFS = &MeteringLocalFSConfig{}
+	}
+	mc.LocalFS.BasePath = basePath
+	mc.LocalFS.CreateDirs = true
+	return mc
+}
+
+// WithAWSConfig sets AWS specific configuration
+func (mc *MeteringConfig) WithAWSConfig(awsConfig *MeteringAWSConfig) *MeteringConfig {
+	mc.AWS = awsConfig
+	return mc
+}
+
+// WithOSSConfig sets OSS specific configuration
+func (mc *MeteringConfig) WithOSSConfig(ossConfig *MeteringOSSConfig) *MeteringConfig {
+	mc.OSS = ossConfig
+	return mc
+}
+
+// WithLocalFSConfig sets LocalFS specific configuration
+func (mc *MeteringConfig) WithLocalFSConfig(localConfig *MeteringLocalFSConfig) *MeteringConfig {
+	mc.LocalFS = localConfig
+	return mc
+}
+
+// WithPrefix sets the path prefix
+func (mc *MeteringConfig) WithPrefix(prefix string) *MeteringConfig {
+	mc.Prefix = prefix
+	return mc
+}
+
+// WithEndpoint sets the custom endpoint
+func (mc *MeteringConfig) WithEndpoint(endpoint string) *MeteringConfig {
+	mc.Endpoint = endpoint
+	return mc
+}
+
+// WithSharedPoolID sets the shared pool cluster ID
+func (mc *MeteringConfig) WithSharedPoolID(poolID string) *MeteringConfig {
+	mc.SharedPoolID = poolID
+	return mc
+}
+
+// GetSharedPoolID gets the shared pool cluster ID
+func (mc *MeteringConfig) GetSharedPoolID() string {
+	return mc.SharedPoolID
+}
+
+// WithAWSRoleARN sets the AWS IAM role ARN for assume role
+func (mc *MeteringConfig) WithAWSRoleARN(roleARN string) *MeteringConfig {
+	if mc.AWS == nil {
+		mc.AWS = &MeteringAWSConfig{}
+	}
+	mc.AWS.AssumeRoleARN = roleARN
+	return mc
+}
+
+// WithOSSRoleARN sets the Alibaba Cloud OSS role ARN for assume role
+func (mc *MeteringConfig) WithOSSRoleARN(roleARN string) *MeteringConfig {
+	if mc.OSS == nil {
+		mc.OSS = &MeteringOSSConfig{}
+	}
+	mc.OSS.AssumeRoleARN = roleARN
+	return mc
 }
