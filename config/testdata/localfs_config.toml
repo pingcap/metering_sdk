@@ -1,0 +1,8 @@
+type = "localfs"
+prefix = "local-prefix"
+shared-pool-id = "shared-pool-003"
+
+[localfs]
+base-path = "/tmp/test-data"
+create-dirs = true
+permissions = "0755"

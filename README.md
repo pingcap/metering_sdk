@@ -345,6 +345,217 @@ func main() {
 }
 ```
 
+## High-Level Configuration
+
+The SDK provides a high-level configuration structure `MeteringConfig` that simplifies setup and supports multiple configuration formats (YAML, JSON, TOML).
+
+### Programmatic Configuration
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+    metawriter "github.com/pingcap/metering_sdk/writer/meta"
+)
+
+func main() {
+    // Create high-level configuration
+    meteringCfg := config.NewMeteringConfig().
+        WithS3("us-west-2", "my-bucket").
+        WithPrefix("metering-data").
+        WithSharedPoolID("shared-pool-001")
+
+    // Convert to storage provider config
+    providerCfg := meteringCfg.ToProviderConfig()
+    
+    // Create storage provider
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    // Use with writers/readers
+    cfg := config.DefaultConfig()
+    writer := metawriter.NewMetaWriter(provider, cfg)
+    defer writer.Close()
+
+    // Write metadata with shared pool ID
+    ctx := context.Background()
+    sharedPoolID := meteringCfg.GetSharedPoolID()
+    
+    // ... use sharedPoolID in your logic
+    fmt.Printf("Using shared pool ID: %s\n", sharedPoolID)
+}
+```
+
+### Configuration from YAML
+
+Create a `config.yaml` file:
+
+```yaml
+type: s3
+region: us-west-2
+bucket: my-bucket
+prefix: metering-data
+shared-pool-id: shared-pool-001
+aws:
+  assume-role-arn: arn:aws:iam::123456789012:role/MeteringRole
+  s3-force-path-style: false
+```
+
+Load and use the configuration:
+
+```go
+package main
+
+import (
+    "os"
+    "gopkg.in/yaml.v3"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Read YAML file
+    data, err := os.ReadFile("config.yaml")
+    if err != nil {
+        log.Fatalf("Failed to read config file: %v", err)
+    }
+
+    // Parse YAML
+    var meteringCfg config.MeteringConfig
+    err = yaml.Unmarshal(data, &meteringCfg)
+    if err != nil {
+        log.Fatalf("Failed to parse config: %v", err)
+    }
+
+    // Create storage provider
+    providerCfg := meteringCfg.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    fmt.Printf("Configuration loaded successfully!\n")
+    fmt.Printf("Shared Pool ID: %s\n", meteringCfg.GetSharedPoolID())
+}
+```
+
+### Configuration from JSON
+
+Create a `config.json` file:
+
+```json
+{
+  "type": "oss",
+  "region": "oss-cn-hangzhou",
+  "bucket": "my-bucket",
+  "prefix": "metering-data",
+  "shared-pool-id": "shared-pool-002",
+  "oss": {
+    "assume-role-arn": "acs:ram::123456789012:role/MeteringRole"
+  }
+}
+```
+
+Load and use the configuration:
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "os"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Read JSON file
+    data, err := os.ReadFile("config.json")
+    if err != nil {
+        log.Fatalf("Failed to read config file: %v", err)
+    }
+
+    // Parse JSON
+    var meteringCfg config.MeteringConfig
+    err = json.Unmarshal(data, &meteringCfg)
+    if err != nil {
+        log.Fatalf("Failed to parse config: %v", err)
+    }
+
+    // Create storage provider
+    providerCfg := meteringCfg.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    fmt.Printf("Configuration loaded successfully!\n")
+    fmt.Printf("Shared Pool ID: %s\n", meteringCfg.GetSharedPoolID())
+}
+```
+
+### Configuration from TOML
+
+Create a `config.toml` file:
+
+```toml
+type = "localfs"
+prefix = "metering-data"
+shared-pool-id = "shared-pool-003"
+
+[localfs]
+base-path = "/tmp/metering-data"
+create-dirs = true
+permissions = "0755"
+```
+
+Load and use the configuration:
+
+```go
+package main
+
+import (
+    "os"
+    "github.com/BurntSushi/toml"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Read TOML file
+    data, err := os.ReadFile("config.toml")
+    if err != nil {
+        log.Fatalf("Failed to read config file: %v", err)
+    }
+
+    // Parse TOML
+    var meteringCfg config.MeteringConfig
+    err = toml.Unmarshal(data, &meteringCfg)
+    if err != nil {
+        log.Fatalf("Failed to parse config: %v", err)
+    }
+
+    // Create storage provider
+    providerCfg := meteringCfg.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    fmt.Printf("Configuration loaded successfully!\n")
+    fmt.Printf("Shared Pool ID: %s\n", meteringCfg.GetSharedPoolID())
+}
+```
+
 ## AWS AssumeRole Configuration
 
 The SDK supports AWS IAM role assumption for enhanced security and cross-account access.
