@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -37,19 +38,36 @@ func NewS3Provider(providerConfig *ProviderConfig) (*S3Provider, error) {
 			return nil, fmt.Errorf("invalid AWS config type, expected aws.Config")
 		}
 	} else {
-		// Use default configuration loading
-		cfg, err = config.LoadDefaultConfig(context.TODO())
+		// Build config options
+		var configOptions []func(*config.LoadOptions) error
+
+		// Set region if provided
+		if providerConfig.Region != "" {
+			configOptions = append(configOptions, config.WithRegion(providerConfig.Region))
+		}
+
+		// Set credentials if provided
+		if providerConfig.AWS != nil && providerConfig.AWS.AccessKey != "" && providerConfig.AWS.SecretAccessKey != "" {
+			staticCredentials := credentials.NewStaticCredentialsProvider(
+				providerConfig.AWS.AccessKey,
+				providerConfig.AWS.SecretAccessKey,
+				providerConfig.AWS.SessionToken,
+			)
+			configOptions = append(configOptions, config.WithCredentialsProvider(staticCredentials))
+		}
+
+		// Load config with all options
+		cfg, err = config.LoadDefaultConfig(context.TODO(), configOptions...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load AWS config: %w", err)
 		}
 
-		// Apply custom configuration
-		if providerConfig.Region != "" {
-			cfg.Region = providerConfig.Region
-		}
+		// Set endpoint after loading config
 		if providerConfig.Endpoint != "" {
 			cfg.BaseEndpoint = aws.String(providerConfig.Endpoint)
 		}
+
+		// Set up assume role if configured (this takes precedence over static credentials for STS operations)
 		if providerConfig.AWS != nil && providerConfig.AWS.AssumeRoleARN != "" {
 			cfg.Credentials = aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), providerConfig.AWS.AssumeRoleARN))
 		}

@@ -4,4 +4,5 @@ bucket: test-bucket
 prefix: test-prefix
 aws:
   assume-role-arn: arn:aws:iam::123456789012:role/TestRole
+  s3-force-path-style: true
 shared-pool-id: shared-pool-001

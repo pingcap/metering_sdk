@@ -36,6 +36,9 @@ type ProviderConfig struct {
 type AWSConfig struct {
 	S3ForcePathStyle bool   `json:"s3_force_path_style,omitempty"`
 	AssumeRoleARN    string `json:"assume_role_arn,omitempty"`
+	AccessKey        string `json:"access_key,omitempty"`
+	SecretAccessKey  string `json:"secret_access_key,omitempty"`
+	SessionToken     string `json:"session_token,omitempty"`
 	// Custom AWS Config object for aws-sdk-go-v2
 	CustomConfig interface{} `json:"-"` // not serialized, used to pass aws.Config
 }
@@ -53,7 +56,10 @@ type AzureConfig struct {
 
 // OSSConfig Alibaba Cloud OSS specific configuration
 type OSSConfig struct {
-	AssumeRoleARN string `json:"assume_role_arn,omitempty"`
+	AssumeRoleARN   string `json:"assume_role_arn,omitempty"`
+	AccessKey       string `json:"access_key,omitempty"`
+	SecretAccessKey string `json:"secret_access_key,omitempty"`
+	SessionToken    string `json:"session_token,omitempty"`
 	// Custom OSS Config object for oss-sdk-go-v2
 	CustomConfig interface{} `json:"-"` // not serialized, used to pass oss config
 }

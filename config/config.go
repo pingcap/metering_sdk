@@ -1,6 +1,10 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
+	"strings"
+
 	"github.com/pingcap/metering_sdk/storage"
 	"go.uber.org/zap"
 )
@@ -121,11 +125,17 @@ func (c *Config) WithPageSizeMB(sizeMB int64) *Config {
 type MeteringAWSConfig struct {
 	AssumeRoleARN    string `yaml:"assume-role-arn,omitempty" toml:"assume-role-arn,omitempty" json:"assume-role-arn,omitempty" reloadable:"false"`
 	S3ForcePathStyle bool   `yaml:"s3-force-path-style,omitempty" toml:"s3-force-path-style,omitempty" json:"s3-force-path-style,omitempty" reloadable:"false"`
+	AccessKey        string `yaml:"access-key,omitempty" toml:"access-key,omitempty" json:"access-key,omitempty" reloadable:"false"`
+	SecretAccessKey  string `yaml:"secret-access-key,omitempty" toml:"secret-access-key,omitempty" json:"secret-access-key,omitempty" reloadable:"false"`
+	SessionToken     string `yaml:"session-token,omitempty" toml:"session-token,omitempty" json:"session-token,omitempty" reloadable:"false"`
 }
 
 // MeteringOSSConfig Alibaba Cloud OSS specific configuration for high-level config
 type MeteringOSSConfig struct {
-	AssumeRoleARN string `yaml:"assume-role-arn,omitempty" toml:"assume-role-arn,omitempty" json:"assume-role-arn,omitempty" reloadable:"false"`
+	AssumeRoleARN   string `yaml:"assume-role-arn,omitempty" toml:"assume-role-arn,omitempty" json:"assume-role-arn,omitempty" reloadable:"false"`
+	AccessKey       string `yaml:"access-key,omitempty" toml:"access-key,omitempty" json:"access-key,omitempty" reloadable:"false"`
+	SecretAccessKey string `yaml:"secret-access-key,omitempty" toml:"secret-access-key,omitempty" json:"secret-access-key,omitempty" reloadable:"false"`
+	SessionToken    string `yaml:"session-token,omitempty" toml:"session-token,omitempty" json:"session-token,omitempty" reloadable:"false"`
 }
 
 // MeteringLocalFSConfig local filesystem specific configuration for high-level config
@@ -175,12 +185,18 @@ func (mc *MeteringConfig) ToProviderConfig() *storage.ProviderConfig {
 			config.AWS = &storage.AWSConfig{
 				AssumeRoleARN:    mc.AWS.AssumeRoleARN,
 				S3ForcePathStyle: mc.AWS.S3ForcePathStyle,
+				AccessKey:        mc.AWS.AccessKey,
+				SecretAccessKey:  mc.AWS.SecretAccessKey,
+				SessionToken:     mc.AWS.SessionToken,
 			}
 		}
 	case storage.ProviderTypeOSS:
 		if mc.OSS != nil {
 			config.OSS = &storage.OSSConfig{
-				AssumeRoleARN: mc.OSS.AssumeRoleARN,
+				AssumeRoleARN:   mc.OSS.AssumeRoleARN,
+				AccessKey:       mc.OSS.AccessKey,
+				SecretAccessKey: mc.OSS.SecretAccessKey,
+				SessionToken:    mc.OSS.SessionToken,
 			}
 		}
 	case storage.ProviderTypeLocalFS:
@@ -309,4 +325,162 @@ func (mc *MeteringConfig) WithOSSRoleARN(roleARN string) *MeteringConfig {
 	}
 	mc.OSS.AssumeRoleARN = roleARN
 	return mc
+}
+
+// NewFromURI creates a new MeteringConfig from a URI string.
+// URI format: [scheme]://[bucket]/[prefix]?[parameters]
+// Examples:
+//   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
+//   - oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE
+//   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
+//
+// Supported schemes: s3, oss, localfs, file
+// Common parameters: region-id, endpoint, shared-pool-id
+// AWS/S3 parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn, s3-force-path-style
+// OSS parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn
+// LocalFS parameters: create-dirs, permissions
+func NewFromURI(uriStr string) (*MeteringConfig, error) {
+	parsedURL, err := url.Parse(uriStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URI: %w", err)
+	}
+
+	config := NewMeteringConfig()
+
+	// Parse scheme to determine provider type
+	switch strings.ToLower(parsedURL.Scheme) {
+	case "s3":
+		config.Type = storage.ProviderTypeS3
+	case "oss":
+		config.Type = storage.ProviderTypeOSS
+	case "localfs", "file":
+		config.Type = storage.ProviderTypeLocalFS
+	default:
+		return nil, fmt.Errorf("unsupported URI scheme: %s", parsedURL.Scheme)
+	}
+
+	// Parse host and path based on provider type
+	if config.Type == storage.ProviderTypeLocalFS {
+		// For localfs, handle different path formats
+		var basePath string
+		if parsedURL.Host != "" {
+			// For URI like "localfs://host/path", combine host and path
+			basePath = "/" + parsedURL.Host + parsedURL.Path
+		} else {
+			// For URI like "file:///path" or "localfs:///path", use path directly
+			basePath = parsedURL.Path
+		}
+		config.LocalFS = &MeteringLocalFSConfig{
+			BasePath:   basePath,
+			CreateDirs: true, // default
+		}
+	} else {
+		// For cloud providers, host is bucket name
+		if parsedURL.Host != "" {
+			config.Bucket = parsedURL.Host
+		}
+
+		// Path is the prefix (remove leading slash)
+		if parsedURL.Path != "" {
+			config.Prefix = strings.TrimPrefix(parsedURL.Path, "/")
+		}
+	}
+
+	// Parse query parameters
+	queryParams := parsedURL.Query()
+
+	// Common parameters
+	if regionID := queryParams.Get("region-id"); regionID != "" {
+		config.Region = regionID
+	}
+	if prefix := queryParams.Get("prefix"); prefix != "" {
+		config.Prefix = prefix
+	}
+	if endpoint := queryParams.Get("endpoint"); endpoint != "" {
+		config.Endpoint = endpoint
+	}
+	if sharedPoolID := queryParams.Get("shared-pool-id"); sharedPoolID != "" {
+		config.SharedPoolID = sharedPoolID
+	}
+
+	// Provider-specific parameters
+	switch config.Type {
+	case storage.ProviderTypeS3:
+		awsConfig := &MeteringAWSConfig{}
+		hasAWSConfig := false
+
+		if accessKey := queryParams.Get("access-key"); accessKey != "" {
+			awsConfig.AccessKey = accessKey
+			hasAWSConfig = true
+		}
+		if secretKey := queryParams.Get("secret-access-key"); secretKey != "" {
+			awsConfig.SecretAccessKey = secretKey
+			hasAWSConfig = true
+		}
+		if sessionToken := queryParams.Get("session-token"); sessionToken != "" {
+			awsConfig.SessionToken = sessionToken
+			hasAWSConfig = true
+		}
+		// Support both "assume-role-arn" and "role-arn" parameter names
+		roleARN := queryParams.Get("assume-role-arn")
+		if roleARN == "" {
+			roleARN = queryParams.Get("role-arn")
+		}
+		if roleARN != "" {
+			awsConfig.AssumeRoleARN = roleARN
+			hasAWSConfig = true
+		}
+		if forcePathStyle := queryParams.Get("s3-force-path-style"); forcePathStyle == "true" {
+			awsConfig.S3ForcePathStyle = true
+			hasAWSConfig = true
+		}
+
+		if hasAWSConfig {
+			config.AWS = awsConfig
+		}
+
+	case storage.ProviderTypeOSS:
+		ossConfig := &MeteringOSSConfig{}
+		hasOSSConfig := false
+
+		if accessKey := queryParams.Get("access-key"); accessKey != "" {
+			ossConfig.AccessKey = accessKey
+			hasOSSConfig = true
+		}
+		if secretKey := queryParams.Get("secret-access-key"); secretKey != "" {
+			ossConfig.SecretAccessKey = secretKey
+			hasOSSConfig = true
+		}
+		if sessionToken := queryParams.Get("session-token"); sessionToken != "" {
+			ossConfig.SessionToken = sessionToken
+			hasOSSConfig = true
+		}
+		// Support both "assume-role-arn" and "role-arn" parameter names
+		roleARN := queryParams.Get("assume-role-arn")
+		if roleARN == "" {
+			roleARN = queryParams.Get("role-arn")
+		}
+		if roleARN != "" {
+			ossConfig.AssumeRoleARN = roleARN
+			hasOSSConfig = true
+		}
+
+		if hasOSSConfig {
+			config.OSS = ossConfig
+		}
+
+	case storage.ProviderTypeLocalFS:
+		if config.LocalFS == nil {
+			config.LocalFS = &MeteringLocalFSConfig{CreateDirs: true}
+		}
+
+		if createDirs := queryParams.Get("create-dirs"); createDirs == "false" {
+			config.LocalFS.CreateDirs = false
+		}
+		if permissions := queryParams.Get("permissions"); permissions != "" {
+			config.LocalFS.Permissions = permissions
+		}
+	}
+
+	return config, nil
 }

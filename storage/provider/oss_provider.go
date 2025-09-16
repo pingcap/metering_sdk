@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alibabacloud-go/tea/tea"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 	openapicred "github.com/aliyun/credentials-go/credentials"
@@ -46,30 +47,25 @@ func NewOSSProvider(providerConfig *ProviderConfig) (*OSSProvider, error) {
 
 	} else {
 		// Build configuration
-		cred, err := openapicred.NewCredential(nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create default AliCloud credentials: %w", err)
-		}
-
 		var provider credentials.CredentialsProvider
 
-		// Check if assume role is configured
-		if providerConfig.OSS != nil && providerConfig.OSS.AssumeRoleARN != "" {
-			// Create credential cache for assume role
-			credCache, err := NewCredentialCache(cred, providerConfig.OSS.AssumeRoleARN, providerConfig.Region)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create credential cache: %w", err)
-			}
-
-			// Start background refresh
-			ctx := context.Background()
-			credCache.StartBackgroundRefresh(ctx)
-
-			// Use cached credentials provider
+		// Check if explicit credentials are provided
+		if providerConfig.OSS != nil && providerConfig.OSS.AccessKey != "" && providerConfig.OSS.SecretAccessKey != "" {
+			// Use static credentials provider
 			provider = credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
-				return credCache.GetCredentials(ctx)
+				return credentials.Credentials{
+					AccessKeyID:     providerConfig.OSS.AccessKey,
+					AccessKeySecret: providerConfig.OSS.SecretAccessKey,
+					SecurityToken:   providerConfig.OSS.SessionToken,
+				}, nil
 			})
 		} else {
+			// Use default credentials only when no explicit credentials provided
+			cred, err := openapicred.NewCredential(nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create default AliCloud credentials: %w", err)
+			}
+
 			// Use direct credentials provider
 			provider = credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
 				cred, err := cred.GetCredential()
@@ -82,6 +78,45 @@ func NewOSSProvider(providerConfig *ProviderConfig) (*OSSProvider, error) {
 					AccessKeySecret: *cred.AccessKeySecret,
 					SecurityToken:   *cred.SecurityToken,
 				}, nil
+			})
+		}
+
+		// Check if assume role is configured (this can be used with both static and default credentials)
+		if providerConfig.OSS != nil && providerConfig.OSS.AssumeRoleARN != "" {
+			// For assume role, we need to create credentials first, then use them for assume role
+			var baseCred openapicred.Credential
+			var err error
+
+			if providerConfig.OSS.AccessKey != "" && providerConfig.OSS.SecretAccessKey != "" {
+				// Create credential from static keys
+				baseCred, err = openapicred.NewCredential(&openapicred.Config{
+					Type:            tea.String("access_key"),
+					AccessKeyId:     tea.String(providerConfig.OSS.AccessKey),
+					AccessKeySecret: tea.String(providerConfig.OSS.SecretAccessKey),
+					SecurityToken:   tea.String(providerConfig.OSS.SessionToken),
+				})
+			} else {
+				// Use default credential
+				baseCred, err = openapicred.NewCredential(nil)
+			}
+
+			if err != nil {
+				return nil, fmt.Errorf("failed to create base credentials for assume role: %w", err)
+			}
+
+			// Create credential cache for assume role
+			credCache, err := NewCredentialCache(baseCred, providerConfig.OSS.AssumeRoleARN, providerConfig.Region)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create credential cache: %w", err)
+			}
+
+			// Start background refresh
+			ctx := context.Background()
+			credCache.StartBackgroundRefresh(ctx)
+
+			// Use cached credentials provider
+			provider = credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
+				return credCache.GetCredentials(ctx)
 			})
 		}
 
