@@ -370,12 +370,12 @@ localfs:///[path]?create-dirs=[true|false]&permissions=[mode]
 
 ### URI Parameters
 
-- `region-id`: Region identifier for cloud providers
+- `region-id` / `region`: Region identifier for cloud providers (both parameter names supported)
 - `endpoint`: Custom endpoint URL for S3-compatible services
 - `access-key`, `secret-access-key`, `session-token`: Credentials
 - `assume-role-arn` / `role-arn`: Role ARN for assume role authentication (alias support)
 - `shared-pool-id`: Shared pool cluster ID
-- `s3-force-path-style`: Force path-style requests for S3
+- `s3-force-path-style` / `force-path-style`: Force path-style requests for S3 (both parameter names supported)
 - `create-dirs`: Create directories if they don't exist (LocalFS only)
 - `permissions`: File permissions in octal format (LocalFS only)
 

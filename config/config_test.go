@@ -610,6 +610,128 @@ func TestNewFromURI(t *testing.T) {
 	}
 }
 
+// TestNewFromURI_ParameterAliases tests that URI parameter aliases are supported
+func TestNewFromURI_ParameterAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		uri      string
+		expected *MeteringConfig
+	}{
+		{
+			name: "S3 URI with region parameter alias",
+			uri:  "s3://test-bucket/data?region=us-west-2&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeS3,
+				Region: "us-west-2",
+				Bucket: "test-bucket",
+				Prefix: "data",
+				AWS: &MeteringAWSConfig{
+					AccessKey:       "AKSKEXAMPLE",
+					SecretAccessKey: "AK/SK/EXAMPLEKEY",
+				},
+			},
+		},
+		{
+			name: "S3 URI with force-path-style parameter alias",
+			uri:  "s3://test-bucket/data?region-id=us-west-2&force-path-style=true&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeS3,
+				Region: "us-west-2",
+				Bucket: "test-bucket",
+				Prefix: "data",
+				AWS: &MeteringAWSConfig{
+					AccessKey:        "AKSKEXAMPLE",
+					SecretAccessKey:  "AK/SK/EXAMPLEKEY",
+					S3ForcePathStyle: true,
+				},
+			},
+		},
+		{
+			name: "S3 URI with both region and force-path-style aliases",
+			uri:  "s3://test-bucket/data?region=us-west-2&force-path-style=true&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeS3,
+				Region: "us-west-2",
+				Bucket: "test-bucket",
+				Prefix: "data",
+				AWS: &MeteringAWSConfig{
+					AccessKey:        "AKSKEXAMPLE",
+					SecretAccessKey:  "AK/SK/EXAMPLEKEY",
+					S3ForcePathStyle: true,
+				},
+			},
+		},
+		{
+			name: "OSS URI with region parameter alias",
+			uri:  "oss://my-bucket/data?region=oss-ap-southeast-1&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeOSS,
+				Region: "oss-ap-southeast-1",
+				Bucket: "my-bucket",
+				Prefix: "data",
+				OSS: &MeteringOSSConfig{
+					AccessKey:       "AKSKEXAMPLE",
+					SecretAccessKey: "AK/SK/EXAMPLEKEY",
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with region parameter alias (should be ignored)",
+			uri:  "localfs:///data/storage/logs?region=us-west-2&create-dirs=true",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeLocalFS,
+				Region: "us-west-2", // region should still be parsed for LocalFS
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data/storage/logs",
+					CreateDirs: true,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := NewFromURI(tt.uri)
+			assert.NoError(t, err)
+			assert.NotNil(t, config)
+
+			// Basic configuration
+			assert.Equal(t, tt.expected.Type, config.Type)
+			assert.Equal(t, tt.expected.Region, config.Region)
+			assert.Equal(t, tt.expected.Bucket, config.Bucket)
+			assert.Equal(t, tt.expected.Prefix, config.Prefix)
+
+			// AWS configuration
+			if tt.expected.AWS != nil {
+				assert.NotNil(t, config.AWS)
+				assert.Equal(t, tt.expected.AWS.AccessKey, config.AWS.AccessKey)
+				assert.Equal(t, tt.expected.AWS.SecretAccessKey, config.AWS.SecretAccessKey)
+				assert.Equal(t, tt.expected.AWS.S3ForcePathStyle, config.AWS.S3ForcePathStyle)
+			} else {
+				assert.Nil(t, config.AWS)
+			}
+
+			// OSS configuration
+			if tt.expected.OSS != nil {
+				assert.NotNil(t, config.OSS)
+				assert.Equal(t, tt.expected.OSS.AccessKey, config.OSS.AccessKey)
+				assert.Equal(t, tt.expected.OSS.SecretAccessKey, config.OSS.SecretAccessKey)
+			} else {
+				assert.Nil(t, config.OSS)
+			}
+
+			// LocalFS configuration
+			if tt.expected.LocalFS != nil {
+				assert.NotNil(t, config.LocalFS)
+				assert.Equal(t, tt.expected.LocalFS.BasePath, config.LocalFS.BasePath)
+				assert.Equal(t, tt.expected.LocalFS.CreateDirs, config.LocalFS.CreateDirs)
+			} else {
+				assert.Nil(t, config.LocalFS)
+			}
+		})
+	}
+}
+
 // TestNewFromURI_ToProviderConfig tests that URI-created configs can be converted to ProviderConfig
 func TestNewFromURI_ToProviderConfig(t *testing.T) {
 	uri := "s3://test-bucket/data?region-id=us-west-2&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY&s3-force-path-style=true"
