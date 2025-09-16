@@ -479,6 +479,50 @@ func TestNewFromURI(t *testing.T) {
 			},
 		},
 		{
+			name: "LocalFS URI with host and path - avoid double slash",
+			uri:  "localfs://data/logs",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data/logs",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host and path starting with slash - avoid double slash",
+			uri:  "localfs://data/storage/logs",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data/storage/logs",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host only",
+			uri:  "localfs://data",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host and root path",
+			uri:  "localfs://data/",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
 			name: "S3 URI with custom endpoint",
 			uri:  "s3://bucket/data?region-id=us-west-2&endpoint=https://s3.custom.com",
 			expected: &MeteringConfig{
@@ -584,4 +628,69 @@ func TestNewFromURI_ToProviderConfig(t *testing.T) {
 	assert.Equal(t, "AKSKEXAMPLE", providerConfig.AWS.AccessKey)
 	assert.Equal(t, "AK/SK/EXAMPLEKEY", providerConfig.AWS.SecretAccessKey)
 	assert.True(t, providerConfig.AWS.S3ForcePathStyle)
+}
+
+// TestNewFromURI_PathConstruction tests that LocalFS URI path construction
+// does not create malformed paths with double slashes
+func TestNewFromURI_PathConstruction(t *testing.T) {
+	tests := []struct {
+		name         string
+		uri          string
+		expectedPath string
+		description  string
+	}{
+		{
+			name:         "Host with simple path",
+			uri:          "localfs://data/logs",
+			expectedPath: "/data/logs",
+			description:  "Should combine host and path without double slashes",
+		},
+		{
+			name:         "Host with nested path",
+			uri:          "localfs://var/log/app",
+			expectedPath: "/var/log/app",
+			description:  "Should handle nested paths correctly",
+		},
+		{
+			name:         "Host only",
+			uri:          "localfs://tmp",
+			expectedPath: "/tmp",
+			description:  "Should handle host-only URIs",
+		},
+		{
+			name:         "Host with trailing slash",
+			uri:          "localfs://data/",
+			expectedPath: "/data",
+			description:  "Should handle trailing slash without creating double slashes",
+		},
+		{
+			name:         "Absolute path without host",
+			uri:          "localfs:///absolute/path",
+			expectedPath: "/absolute/path",
+			description:  "Should handle absolute paths correctly",
+		},
+		{
+			name:         "Root path without host",
+			uri:          "localfs:///",
+			expectedPath: "/",
+			description:  "Should handle root path correctly",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := NewFromURI(tt.uri)
+
+			assert.NoError(t, err, "URI parsing should not fail")
+			assert.NotNil(t, config, "Config should not be nil")
+			assert.Equal(t, storage.ProviderTypeLocalFS, config.Type, "Should be LocalFS type")
+			assert.NotNil(t, config.LocalFS, "LocalFS config should not be nil")
+
+			actualPath := config.LocalFS.BasePath
+			assert.Equal(t, tt.expectedPath, actualPath, tt.description)
+
+			// Ensure no double slashes exist in the path (except for Windows UNC paths, but we're not supporting those in this context)
+			assert.NotContains(t, actualPath, "//", "Path should not contain double slashes")
+		})
+	}
 }

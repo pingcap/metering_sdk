@@ -365,7 +365,15 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 		var basePath string
 		if parsedURL.Host != "" {
 			// For URI like "localfs://host/path", combine host and path
-			basePath = "/" + parsedURL.Host + parsedURL.Path
+			// Ensure proper path construction without double slashes
+			hostPath := "/" + parsedURL.Host
+			if parsedURL.Path != "" && parsedURL.Path != "/" {
+				// Remove leading slash from path to avoid double slashes
+				cleanPath := strings.TrimPrefix(parsedURL.Path, "/")
+				basePath = hostPath + "/" + cleanPath
+			} else {
+				basePath = hostPath
+			}
 		} else {
 			// For URI like "file:///path" or "localfs:///path", use path directly
 			basePath = parsedURL.Path
