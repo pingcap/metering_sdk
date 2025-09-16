@@ -335,8 +335,8 @@ func (mc *MeteringConfig) WithOSSRoleARN(roleARN string) *MeteringConfig {
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
 //
 // Supported schemes: s3, oss, localfs, file
-// Common parameters: region-id, endpoint, shared-pool-id
-// AWS/S3 parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn, s3-force-path-style
+// Common parameters: region-id/region, endpoint, shared-pool-id
+// AWS/S3 parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn, s3-force-path-style/force-path-style
 // OSS parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn
 // LocalFS parameters: create-dirs, permissions
 func NewFromURI(uriStr string) (*MeteringConfig, error) {
@@ -398,7 +398,12 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 	queryParams := parsedURL.Query()
 
 	// Common parameters
-	if regionID := queryParams.Get("region-id"); regionID != "" {
+	// Support both "region-id" and "region" parameter names
+	regionID := queryParams.Get("region-id")
+	if regionID == "" {
+		regionID = queryParams.Get("region")
+	}
+	if regionID != "" {
 		config.Region = regionID
 	}
 	if prefix := queryParams.Get("prefix"); prefix != "" {
@@ -438,7 +443,12 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 			awsConfig.AssumeRoleARN = roleARN
 			hasAWSConfig = true
 		}
-		if forcePathStyle := queryParams.Get("s3-force-path-style"); forcePathStyle == "true" {
+		// Support both "s3-force-path-style" and "force-path-style" parameter names
+		forcePathStyle := queryParams.Get("s3-force-path-style")
+		if forcePathStyle == "" {
+			forcePathStyle = queryParams.Get("force-path-style")
+		}
+		if forcePathStyle == "true" {
 			awsConfig.S3ForcePathStyle = true
 			hasAWSConfig = true
 		}
