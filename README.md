@@ -4,12 +4,14 @@ A Go SDK for writing and reading metering data to various storage backends inclu
 
 ## Features
 
-- **Multiple Storage Backends**: Support for local filesystem and AWS S3
+- **Multiple Storage Backends**: Support for local filesystem, AWS S3, and Alibaba Cloud OSS
+- **URI Configuration**: Simple URI-based configuration for all storage providers
 - **Data Types**: Write both metering data and metadata
 - **Pagination**: Automatic data pagination for large datasets
 - **Compression**: Built-in gzip compression
 - **Validation**: Comprehensive data validation
 - **Concurrency Safe**: Thread-safe operations
+- **AssumeRole Support**: AWS and Alibaba Cloud role assumption for enhanced security
 
 ## Installation
 
@@ -344,6 +346,198 @@ func main() {
     }
 }
 ```
+
+## URI Configuration
+
+The SDK provides a convenient URI-based configuration method that allows you to configure storage providers using simple URI strings. This is especially useful for configuration files, environment variables, or command-line parameters.
+
+### Supported URI Formats
+
+#### S3 (Amazon S3 / S3-Compatible Services)
+```
+s3://[bucket]/[prefix]?region-id=[region]&endpoint=[endpoint]&access-key=[key]&secret-access-key=[secret]&...
+```
+
+#### OSS (Alibaba Cloud Object Storage Service)
+```
+oss://[bucket]/[prefix]?region-id=[region]&access-key=[key]&secret-access-key=[secret]&role-arn=[arn]&...
+```
+
+#### LocalFS (Local File System)
+```
+localfs:///[path]?create-dirs=[true|false]&permissions=[mode]
+```
+
+### URI Parameters
+
+- `region-id`: Region identifier for cloud providers
+- `endpoint`: Custom endpoint URL for S3-compatible services
+- `access-key`, `secret-access-key`, `session-token`: Credentials
+- `assume-role-arn` / `role-arn`: Role ARN for assume role authentication (alias support)
+- `shared-pool-id`: Shared pool cluster ID
+- `s3-force-path-style`: Force path-style requests for S3
+- `create-dirs`: Create directories if they don't exist (LocalFS only)
+- `permissions`: File permissions in octal format (LocalFS only)
+
+### Basic URI Configuration
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/pingcap/metering_sdk/common"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+    meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
+)
+
+func main() {
+    // Parse URI into configuration
+    uri := "s3://my-bucket/logs?region-id=us-east-1"
+    meteringConfig, err := config.NewFromURI(uri)
+    if err != nil {
+        log.Fatalf("Failed to parse URI: %v", err)
+    }
+
+    // Convert to storage provider config
+    providerConfig := meteringConfig.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerConfig)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    // Create metering writer
+    cfg := config.DefaultConfig().WithDevelopmentLogger()
+    writer := meteringwriter.NewMeteringWriter(provider, cfg)
+    defer writer.Close()
+
+    // Write metering data (same as other examples)
+    ctx := context.Background()
+    meteringData := &common.MeteringData{
+        SelfID:    "tidbserver01",
+        Timestamp: time.Now().Unix() / 60 * 60,
+        Category:  "tidb-server",
+        Data: []map[string]interface{}{
+            {
+                "logical_cluster_id": "lc-prod-001",
+                "compute_seconds":    &common.MeteringValue{Value: 3600, Unit: "seconds"},
+            },
+        },
+    }
+
+    if err := writer.Write(ctx, meteringData); err != nil {
+        log.Fatalf("Failed to write metering data: %v", err)
+    }
+    fmt.Println("Metering data written successfully!")
+}
+```
+
+### URI Configuration with Credentials
+
+```go
+// S3 with static credentials
+s3URI := "s3://my-bucket/data?region-id=us-east-1&access-key=AKIAIOSFODNN7EXAMPLE&secret-access-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+// OSS with credentials and assume role
+ossURI := "oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=LTAI5tExample&secret-access-key=ExampleSecretKey&role-arn=acs:ram::123456789012:role/TestRole"
+
+// LocalFS with permissions
+localURI := "localfs:///tmp/metering-data?create-dirs=true&permissions=0755"
+
+// Parse any of these URIs
+meteringConfig, err := config.NewFromURI(s3URI)
+// ... rest of the code
+```
+
+### URI Configuration with Custom Endpoint
+
+```go
+// S3-compatible service (MinIO, etc.)
+minioURI := "s3://my-bucket/data?region-id=us-east-1&endpoint=https://minio.example.com:9000&s3-force-path-style=true&access-key=minioadmin&secret-access-key=minioadmin"
+
+meteringConfig, err := config.NewFromURI(minioURI)
+if err != nil {
+    log.Fatalf("Failed to parse MinIO URI: %v", err)
+}
+
+// The endpoint and path-style settings are automatically configured
+providerConfig := meteringConfig.ToProviderConfig()
+// providerConfig.Endpoint will be "https://minio.example.com:9000"
+// providerConfig.AWS.S3ForcePathStyle will be true
+```
+
+### Environment Variable Configuration
+
+You can use URI configuration with environment variables:
+
+```bash
+# Set environment variable
+export METERING_STORAGE_URI="s3://prod-metering-bucket/data?region-id=us-west-2&assume-role-arn=arn:aws:iam::123456789012:role/MeteringRole"
+```
+
+```go
+package main
+
+import (
+    "os"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Read URI from environment variable
+    uri := os.Getenv("METERING_STORAGE_URI")
+    if uri == "" {
+        log.Fatal("METERING_STORAGE_URI environment variable is required")
+    }
+
+    // Parse and use the URI
+    meteringConfig, err := config.NewFromURI(uri)
+    if err != nil {
+        log.Fatalf("Failed to parse URI from environment: %v", err)
+    }
+
+    providerConfig := meteringConfig.ToProviderConfig()
+    provider, err := storage.NewObjectStorageProvider(providerConfig)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    fmt.Println("Storage provider created from environment URI!")
+}
+```
+
+### URI Configuration Examples
+
+```go
+// Basic S3 configuration
+"s3://my-bucket/prefix?region-id=us-east-1"
+
+// S3 with credentials and custom endpoint
+"s3://my-bucket/data?region-id=us-west-2&access-key=AKSKEXAMPLE&secret-access-key=SECRET&endpoint=https://s3.example.com"
+
+// S3 with assume role
+"s3://my-bucket/logs?region-id=us-east-1&assume-role-arn=arn:aws:iam::123456789012:role/MeteringRole"
+
+// OSS with credentials
+"oss://my-oss-bucket/data?region-id=oss-ap-southeast-1&access-key=LTAI5tExample&secret-access-key=ExampleKey"
+
+// OSS with assume role (using alias)
+"oss://my-oss-bucket/logs?region-id=oss-cn-hangzhou&role-arn=acs:ram::123456789012:role/TestRole"
+
+// LocalFS with auto-create directories
+"localfs:///data/metering?create-dirs=true&permissions=0755"
+
+// MinIO (S3-compatible) with path-style
+"s3://my-bucket/data?region-id=us-east-1&endpoint=https://minio.local:9000&s3-force-path-style=true"
+```
+
+For more detailed URI configuration examples, see `examples/uri_config/`.
 
 ## High-Level Configuration
 
@@ -868,6 +1062,7 @@ Example:
 
 Check the `examples/` directory for more comprehensive examples:
 
+- `examples/uri_config/` - URI configuration examples for all storage providers
 - `examples/write_meta/` - S3 metadata writing example
 - `examples/write_metering_all/` - S3 metering data writing example
 - `examples/write_metering_all_assumerole/` - S3 metering data writing with AssumeRole

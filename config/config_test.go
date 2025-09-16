@@ -371,3 +371,326 @@ func TestLoadConfigFromFiles(t *testing.T) {
 		})
 	}
 }
+
+// TestNewFromURI tests creating MeteringConfig from URI strings
+func TestNewFromURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		uri      string
+		expected *MeteringConfig
+		wantErr  bool
+	}{
+		{
+			name: "S3 URI with basic configuration",
+			uri:  "s3://test-bucket/data?region-id=us-west-2&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeS3,
+				Region: "us-west-2",
+				Bucket: "test-bucket",
+				Prefix: "data",
+				AWS: &MeteringAWSConfig{
+					AccessKey:       "AKSKEXAMPLE",
+					SecretAccessKey: "AK/SK/EXAMPLEKEY",
+				},
+			},
+		},
+		{
+			name: "S3 URI with all AWS parameters",
+			uri:  "s3://my-bucket/logs?region-id=us-east-1&assume-role-arn=arn:aws:iam::123456789012:role/TestRole&s3-force-path-style=true&session-token=token123&shared-pool-id=pool-001",
+			expected: &MeteringConfig{
+				Type:         storage.ProviderTypeS3,
+				Region:       "us-east-1",
+				Bucket:       "my-bucket",
+				Prefix:       "logs",
+				SharedPoolID: "pool-001",
+				AWS: &MeteringAWSConfig{
+					AssumeRoleARN:    "arn:aws:iam::123456789012:role/TestRole",
+					S3ForcePathStyle: true,
+					SessionToken:     "token123",
+				},
+			},
+		},
+		{
+			name: "S3 URI with role-arn parameter (alias for assume-role-arn)",
+			uri:  "s3://my-bucket/logs?region-id=us-east-1&role-arn=arn:aws:iam::123456789012:role/TestRole&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeS3,
+				Region: "us-east-1",
+				Bucket: "my-bucket",
+				Prefix: "logs",
+				AWS: &MeteringAWSConfig{
+					AssumeRoleARN:   "arn:aws:iam::123456789012:role/TestRole",
+					AccessKey:       "AKSKEXAMPLE",
+					SecretAccessKey: "AK/SK/EXAMPLEKEY",
+				},
+			},
+		},
+		{
+			name: "OSS URI with credentials",
+			uri:  "oss://my-bucket/data/metering/tmp?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY&session-token=STS.token",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeOSS,
+				Region: "oss-ap-southeast-1",
+				Bucket: "my-bucket",
+				Prefix: "data/metering/tmp",
+				OSS: &MeteringOSSConfig{
+					AccessKey:       "AKSKEXAMPLE",
+					SecretAccessKey: "AK/SK/EXAMPLEKEY",
+					SessionToken:    "STS.token",
+				},
+			},
+		},
+		{
+			name: "OSS URI with role-arn parameter (alias for assume-role-arn)",
+			uri:  "oss://my-bucket/data?region-id=oss-ap-southeast-1&role-arn=acs:ram::123456789012:role/TestRole&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeOSS,
+				Region: "oss-ap-southeast-1",
+				Bucket: "my-bucket",
+				Prefix: "data",
+				OSS: &MeteringOSSConfig{
+					AssumeRoleARN:   "acs:ram::123456789012:role/TestRole",
+					AccessKey:       "AKSKEXAMPLE",
+					SecretAccessKey: "AK/SK/EXAMPLEKEY",
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host and path",
+			uri:  "localfs:///data/storage/logs?create-dirs=false&permissions=0644",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:    "/data/storage/logs",
+					CreateDirs:  false,
+					Permissions: "0644",
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with relative path",
+			uri:  "file:///logs?create-dirs=true",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/logs",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host and path - avoid double slash",
+			uri:  "localfs://data/logs",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data/logs",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host and path starting with slash - avoid double slash",
+			uri:  "localfs://data/storage/logs",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data/storage/logs",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host only",
+			uri:  "localfs://data",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "LocalFS URI with host and root path",
+			uri:  "localfs://data/",
+			expected: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data",
+					CreateDirs: true,
+				},
+			},
+		},
+		{
+			name: "S3 URI with custom endpoint",
+			uri:  "s3://bucket/data?region-id=us-west-2&endpoint=https://s3.custom.com",
+			expected: &MeteringConfig{
+				Type:     storage.ProviderTypeS3,
+				Region:   "us-west-2",
+				Bucket:   "bucket",
+				Prefix:   "data",
+				Endpoint: "https://s3.custom.com",
+			},
+		},
+		{
+			name: "S3 URI matching example format",
+			uri:  "s3://my-bucket/prefix?region-id=us-east-1",
+			expected: &MeteringConfig{
+				Type:   storage.ProviderTypeS3,
+				Region: "us-east-1",
+				Bucket: "my-bucket",
+				Prefix: "prefix",
+			},
+		},
+		{
+			name:    "Invalid URI scheme",
+			uri:     "invalid://test/bucket",
+			wantErr: true,
+		},
+		{
+			name:    "Malformed URI",
+			uri:     "://invalid",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := NewFromURI(tt.uri)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, config)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, config)
+
+			// Compare the basic fields
+			assert.Equal(t, tt.expected.Type, config.Type)
+			assert.Equal(t, tt.expected.Region, config.Region)
+			assert.Equal(t, tt.expected.Bucket, config.Bucket)
+			assert.Equal(t, tt.expected.Prefix, config.Prefix)
+			assert.Equal(t, tt.expected.Endpoint, config.Endpoint)
+			assert.Equal(t, tt.expected.SharedPoolID, config.SharedPoolID)
+
+			// Compare provider-specific configurations
+			if tt.expected.AWS != nil {
+				assert.NotNil(t, config.AWS)
+				assert.Equal(t, tt.expected.AWS.AssumeRoleARN, config.AWS.AssumeRoleARN)
+				assert.Equal(t, tt.expected.AWS.S3ForcePathStyle, config.AWS.S3ForcePathStyle)
+				assert.Equal(t, tt.expected.AWS.AccessKey, config.AWS.AccessKey)
+				assert.Equal(t, tt.expected.AWS.SecretAccessKey, config.AWS.SecretAccessKey)
+				assert.Equal(t, tt.expected.AWS.SessionToken, config.AWS.SessionToken)
+			} else {
+				assert.Nil(t, config.AWS)
+			}
+
+			if tt.expected.OSS != nil {
+				assert.NotNil(t, config.OSS)
+				assert.Equal(t, tt.expected.OSS.AssumeRoleARN, config.OSS.AssumeRoleARN)
+				assert.Equal(t, tt.expected.OSS.AccessKey, config.OSS.AccessKey)
+				assert.Equal(t, tt.expected.OSS.SecretAccessKey, config.OSS.SecretAccessKey)
+				assert.Equal(t, tt.expected.OSS.SessionToken, config.OSS.SessionToken)
+			} else {
+				assert.Nil(t, config.OSS)
+			}
+
+			if tt.expected.LocalFS != nil {
+				assert.NotNil(t, config.LocalFS)
+				assert.Equal(t, tt.expected.LocalFS.BasePath, config.LocalFS.BasePath)
+				assert.Equal(t, tt.expected.LocalFS.CreateDirs, config.LocalFS.CreateDirs)
+				assert.Equal(t, tt.expected.LocalFS.Permissions, config.LocalFS.Permissions)
+			} else {
+				assert.Nil(t, config.LocalFS)
+			}
+		})
+	}
+}
+
+// TestNewFromURI_ToProviderConfig tests that URI-created configs can be converted to ProviderConfig
+func TestNewFromURI_ToProviderConfig(t *testing.T) {
+	uri := "s3://test-bucket/data?region-id=us-west-2&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY&s3-force-path-style=true"
+
+	config, err := NewFromURI(uri)
+	assert.NoError(t, err)
+	assert.NotNil(t, config)
+
+	providerConfig := config.ToProviderConfig()
+	assert.Equal(t, storage.ProviderTypeS3, providerConfig.Type)
+	assert.Equal(t, "us-west-2", providerConfig.Region)
+	assert.Equal(t, "test-bucket", providerConfig.Bucket)
+	assert.Equal(t, "data", providerConfig.Prefix)
+
+	assert.NotNil(t, providerConfig.AWS)
+	assert.Equal(t, "AKSKEXAMPLE", providerConfig.AWS.AccessKey)
+	assert.Equal(t, "AK/SK/EXAMPLEKEY", providerConfig.AWS.SecretAccessKey)
+	assert.True(t, providerConfig.AWS.S3ForcePathStyle)
+}
+
+// TestNewFromURI_PathConstruction tests that LocalFS URI path construction
+// does not create malformed paths with double slashes
+func TestNewFromURI_PathConstruction(t *testing.T) {
+	tests := []struct {
+		name         string
+		uri          string
+		expectedPath string
+		description  string
+	}{
+		{
+			name:         "Host with simple path",
+			uri:          "localfs://data/logs",
+			expectedPath: "/data/logs",
+			description:  "Should combine host and path without double slashes",
+		},
+		{
+			name:         "Host with nested path",
+			uri:          "localfs://var/log/app",
+			expectedPath: "/var/log/app",
+			description:  "Should handle nested paths correctly",
+		},
+		{
+			name:         "Host only",
+			uri:          "localfs://tmp",
+			expectedPath: "/tmp",
+			description:  "Should handle host-only URIs",
+		},
+		{
+			name:         "Host with trailing slash",
+			uri:          "localfs://data/",
+			expectedPath: "/data",
+			description:  "Should handle trailing slash without creating double slashes",
+		},
+		{
+			name:         "Absolute path without host",
+			uri:          "localfs:///absolute/path",
+			expectedPath: "/absolute/path",
+			description:  "Should handle absolute paths correctly",
+		},
+		{
+			name:         "Root path without host",
+			uri:          "localfs:///",
+			expectedPath: "/",
+			description:  "Should handle root path correctly",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := NewFromURI(tt.uri)
+
+			assert.NoError(t, err, "URI parsing should not fail")
+			assert.NotNil(t, config, "Config should not be nil")
+			assert.Equal(t, storage.ProviderTypeLocalFS, config.Type, "Should be LocalFS type")
+			assert.NotNil(t, config.LocalFS, "LocalFS config should not be nil")
+
+			actualPath := config.LocalFS.BasePath
+			assert.Equal(t, tt.expectedPath, actualPath, tt.description)
+
+			// Ensure no double slashes exist in the path (except for Windows UNC paths, but we're not supporting those in this context)
+			assert.NotContains(t, actualPath, "//", "Path should not contain double slashes")
+		})
+	}
+}
