@@ -427,12 +427,12 @@ func TestNewFromURI(t *testing.T) {
 		},
 		{
 			name: "OSS URI with credentials",
-			uri:  "oss://my-bucket/data/meteing/tmp?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY&session-token=STS.token",
+			uri:  "oss://my-bucket/data/metering/tmp?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE&secret-access-key=AK/SK/EXAMPLEKEY&session-token=STS.token",
 			expected: &MeteringConfig{
 				Type:   storage.ProviderTypeOSS,
 				Region: "oss-ap-southeast-1",
 				Bucket: "my-bucket",
-				Prefix: "data/meteing/tmp",
+				Prefix: "data/metering/tmp",
 				OSS: &MeteringOSSConfig{
 					AccessKey:       "AKSKEXAMPLE",
 					SecretAccessKey: "AK/SK/EXAMPLEKEY",
