@@ -22,23 +22,29 @@ go get github.com/pingcap/metering_sdk
 
 ## Important: SharedPoolID Requirement
 
-**⚠️ Breaking Change**: Starting from this version, all metering write operations require a **SharedPoolID**. This is a mandatory field that organizes metering data into logical pools.
+**⚠️ Important Change**: Starting from this version, all metering write operations require a **SharedPoolID**. This is a mandatory field that organizes metering data into logical pools.
 
 ### Key Points:
 - **SharedPoolID is mandatory** for all `MeteringWriter` operations
-- Use `NewMeteringWriterWithSharedPool()` instead of the deprecated `NewMeteringWriter()`
+- `NewMeteringWriter()` now uses a default SharedPoolID: `meteringwriter.DefaultSharedPoolID` (`"default-shared-pool"`)
+- For production use, specify your own SharedPoolID using `NewMeteringWriterWithSharedPool()`
 - SharedPoolID affects the file storage path: `/metering/ru/{timestamp}/{category}/{shared_pool_id}/{self_id}-{part}.json.gz`
 - **No backward compatibility**: Old path formats without SharedPoolID are no longer supported
-- Empty or missing SharedPoolID will result in write errors
 
 ### Migration Guide:
 ```go
-// ❌ Old way (deprecated, will fail)
+// ✅ Option 1: Use default SharedPoolID (for quick start/testing)
 writer := meteringwriter.NewMeteringWriter(provider, cfg)
+// Files will be stored with SharedPoolID = meteringwriter.DefaultSharedPoolID ("default-shared-pool")
 
-// ✅ New way (required)
+// ✅ Option 2: Specify your own SharedPoolID (recommended for production)
 writer := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "your-pool-id")
 ```
+
+### Default SharedPoolID Behavior:
+- `NewMeteringWriter()` automatically uses `meteringwriter.DefaultSharedPoolID` (`"default-shared-pool"`) as the SharedPoolID
+- This maintains backward compatibility while ensuring all files have a valid SharedPoolID
+- For production environments, use explicit SharedPoolID values to better organize your data
 
 ## Quick Start
 
@@ -76,10 +82,13 @@ func main() {
         log.Fatalf("Failed to create storage provider: %v", err)
     }
 
-    // Create metering writer with SharedPoolID (required)
+    // Create metering writer (uses default SharedPoolID: "default-shared-pool")
     cfg := config.DefaultConfig().WithDevelopmentLogger()
-    writer := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "my-shared-pool-001")
+    writer := meteringwriter.NewMeteringWriter(provider, cfg)
     defer writer.Close()
+    
+    // For production, consider using explicit SharedPoolID:
+    // writer := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "production-pool-001")
 
     // Create metering data
     now := time.Now()
@@ -372,14 +381,22 @@ func main() {
 
 SharedPoolID is a mandatory identifier that organizes metering data into logical pools. This section explains different ways to provide SharedPoolID when creating metering writers.
 
-### Method 1: Direct SharedPoolID in Constructor
+### Method 1: Default SharedPoolID (Quick Start)
 
 ```go
-// Recommended approach for simple scenarios
+// Uses default SharedPoolID: "default-shared-pool" 
+writer := meteringwriter.NewMeteringWriter(provider, cfg)
+// Files will be stored at: /metering/ru/{timestamp}/{category}/default-shared-pool/{self_id}-{part}.json.gz
+```
+
+### Method 2: Direct SharedPoolID in Constructor
+
+```go
+// Recommended approach for production scenarios
 writer := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "production-pool-001")
 ```
 
-### Method 2: Using MeteringConfig
+### Method 3: Using MeteringConfig
 
 ```go
 // Create config with SharedPoolID
@@ -391,7 +408,7 @@ meteringCfg := config.NewMeteringConfig().
 writer := meteringwriter.NewMeteringWriterFromConfig(provider, cfg, meteringCfg)
 ```
 
-### Method 3: YAML Configuration
+### Method 4: YAML Configuration
 
 Create a `config.yaml` file:
 
@@ -415,10 +432,21 @@ writer := meteringwriter.NewMeteringWriterFromConfig(provider, cfg, meteringCfg)
 
 ### SharedPoolID Best Practices
 
-1. **Use descriptive names**: `production-tidb-pool`, `staging-analytics-pool`
-2. **Environment separation**: Include environment in the name
-3. **Consistency**: Use the same SharedPoolID across related components
-4. **No special characters**: Stick to alphanumeric characters and hyphens
+1. **Default vs Custom SharedPoolID**:
+   - Use `"default-shared-pool"` for testing and development
+   - Always specify custom SharedPoolID for production environments
+2. **Use descriptive names**: `production-tidb-pool`, `staging-analytics-pool`
+3. **Environment separation**: Include environment in the name
+4. **Consistency**: Use the same SharedPoolID across related components
+5. **No special characters**: Stick to alphanumeric characters and hyphens
+
+### Default SharedPoolID Details
+
+- **Constant**: `meteringwriter.DefaultSharedPoolID`
+- **Value**: `"default-shared-pool"`
+- **Use case**: Quick start, testing, and development
+- **Production recommendation**: Always use explicit SharedPoolID values
+- **Migration path**: Existing code using `NewMeteringWriter()` will automatically use the default
 
 ### File Path Structure
 
@@ -1177,12 +1205,14 @@ if err := writer.Write(ctx, meteringData); err != nil {
 
 #### "SharedPoolID is required and cannot be empty"
 
-**Cause**: Attempting to use deprecated `NewMeteringWriter()` or missing SharedPoolID configuration.
+**Cause**: This error should no longer occur with the current version, as `NewMeteringWriter()` now provides a default SharedPoolID.
 
-**Solution**: Use one of the proper methods to provide SharedPoolID:
-
+**Solution**: 
 ```go
-// ✅ Method 1: Direct constructor
+// ✅ Method 1: Use default SharedPoolID (quick start)
+writer := meteringwriter.NewMeteringWriter(provider, cfg) // Uses "default-shared-pool"
+
+// ✅ Method 2: Specify custom SharedPoolID (recommended for production)
 writer := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "your-pool-id")
 
 // ✅ Method 2: Config-based
@@ -1225,12 +1255,16 @@ timestamp := time.Now().Unix() / 60 * 60
 
 If you're upgrading from a version without SharedPoolID:
 
-1. **Update all writer creation code**:
+1. **Easiest migration - No code changes required**:
    ```go
-   // Old (deprecated)
+   // Existing code continues to work with default SharedPoolID
    writer := meteringwriter.NewMeteringWriter(provider, cfg)
-   
-   // New (required)
+   // Files will now be stored with SharedPoolID = "default-shared-pool"
+   ```
+
+2. **Recommended for production - Specify explicit SharedPoolID**:
+   ```go
+   // Update to use custom SharedPoolID
    writer := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "your-pool-id")
    ```
 

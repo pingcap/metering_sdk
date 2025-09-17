@@ -16,6 +16,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// DefaultSharedPoolID is the default shared pool ID used when none is specified
+	DefaultSharedPoolID = "default-shared-pool"
+)
+
 // pageMeteringData paginated metering data structure
 type pageMeteringData struct {
 	Timestamp    int64                    `json:"timestamp"`      // minute-level timestamp
@@ -37,9 +42,9 @@ type MeteringWriter struct {
 	sharedPoolID string     // shared pool cluster ID for path construction
 }
 
-// NewMeteringWriter creates a new metering data writer
+// NewMeteringWriter creates a new metering data writer with default shared pool ID
 func NewMeteringWriter(provider storage.ObjectStorageProvider, cfg *config.Config) *MeteringWriter {
-	return NewMeteringWriterWithSharedPool(provider, cfg, "")
+	return NewMeteringWriterWithSharedPool(provider, cfg, DefaultSharedPoolID)
 }
 
 // NewMeteringWriterWithSharedPool creates a new metering data writer with shared pool ID
@@ -67,6 +72,12 @@ func NewMeteringWriterFromConfig(provider storage.ObjectStorageProvider, cfg *co
 	if meteringConfig != nil {
 		sharedPoolID = meteringConfig.GetSharedPoolID()
 	}
+
+	// If SharedPoolID is empty, use the default value
+	if sharedPoolID == "" {
+		sharedPoolID = DefaultSharedPoolID
+	}
+
 	return NewMeteringWriterWithSharedPool(provider, cfg, sharedPoolID)
 }
 

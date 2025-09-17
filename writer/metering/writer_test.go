@@ -632,13 +632,83 @@ func TestNewMeteringWriterFromConfig(t *testing.T) {
 	t.Logf("✓ MeteringConfig with SharedPoolID correctly applied: %s", expectedPath)
 }
 
+func TestNewMeteringWriterFromConfigWithDefaults(t *testing.T) {
+	mockProvider := NewMockStorageProvider()
+	cfg := config.DefaultConfig()
+
+	t.Run("nil_metering_config", func(t *testing.T) {
+		// Create writer with nil MeteringConfig
+		meteringWriter := NewMeteringWriterFromConfig(mockProvider, cfg, nil)
+		defer meteringWriter.Close()
+
+		// Create test data
+		testData := &common.MeteringData{
+			Timestamp: 1640995200,
+			Category:  "storage",
+			SelfID:    "tikv001",
+			Data: []map[string]interface{}{
+				{
+					"logical_cluster_id": "lc-test",
+					"disk_usage":         &common.MeteringValue{Value: 100, Unit: "GB"},
+				},
+			},
+		}
+
+		// Write data
+		ctx := context.Background()
+		err := meteringWriter.Write(ctx, testData)
+		assert.NoError(t, err, "Write should succeed with nil MeteringConfig")
+
+		// Verify it uses default SharedPoolID
+		expectedPath := "metering/ru/1640995200/storage/" + DefaultSharedPoolID + "/tikv001-0.json.gz"
+		_, exists := mockProvider.uploadedData[expectedPath]
+		assert.True(t, exists, "Expected file not found at path: %s", expectedPath)
+
+		t.Logf("✓ Nil MeteringConfig correctly uses default SharedPoolID: %s", DefaultSharedPoolID)
+	})
+
+	t.Run("empty_shared_pool_id", func(t *testing.T) {
+		// Create MeteringConfig with empty SharedPoolID
+		meteringConfig := config.NewMeteringConfig().WithSharedPoolID("")
+
+		// Create writer from config
+		meteringWriter := NewMeteringWriterFromConfig(mockProvider, cfg, meteringConfig)
+		defer meteringWriter.Close()
+
+		// Create test data
+		testData := &common.MeteringData{
+			Timestamp: 1640995260,
+			Category:  "compute",
+			SelfID:    "tidb001",
+			Data: []map[string]interface{}{
+				{
+					"logical_cluster_id": "lc-test",
+					"cpu_usage":          &common.MeteringValue{Value: 80, Unit: "percent"},
+				},
+			},
+		}
+
+		// Write data
+		ctx := context.Background()
+		err := meteringWriter.Write(ctx, testData)
+		assert.NoError(t, err, "Write should succeed with empty SharedPoolID")
+
+		// Verify it uses default SharedPoolID
+		expectedPath := "metering/ru/1640995260/compute/" + DefaultSharedPoolID + "/tidb001-0.json.gz"
+		_, exists := mockProvider.uploadedData[expectedPath]
+		assert.True(t, exists, "Expected file not found at path: %s", expectedPath)
+
+		t.Logf("✓ Empty SharedPoolID correctly uses default: %s", DefaultSharedPoolID)
+	})
+}
+
 // TestSharedPoolIDRequired tests that SharedPoolID is required for all writes
 func TestSharedPoolIDRequired(t *testing.T) {
 	mockProvider := NewMockStorageProvider()
 	cfg := config.DefaultConfig()
 
-	// Create writer without SharedPoolID
-	meteringWriter := NewMeteringWriter(mockProvider, cfg)
+	// Create writer with explicitly empty SharedPoolID
+	meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "")
 	defer meteringWriter.Close()
 
 	// Create test data without SharedPoolID
@@ -654,7 +724,7 @@ func TestSharedPoolIDRequired(t *testing.T) {
 		},
 	}
 
-	// Write should fail because SharedPoolID is required
+	// Write should fail because SharedPoolID is empty
 	ctx := context.Background()
 	err := meteringWriter.Write(ctx, testData)
 	assert.Error(t, err, "Write should fail when SharedPoolID is empty")
@@ -663,5 +733,60 @@ func TestSharedPoolIDRequired(t *testing.T) {
 	// Verify no data was uploaded
 	assert.Empty(t, mockProvider.uploadedData, "No data should be uploaded when SharedPoolID is empty")
 
-	t.Logf("✓ Correctly rejected write without SharedPoolID: %v", err)
+	t.Logf("✓ Correctly rejected write with empty SharedPoolID: %v", err)
+}
+
+// TestDefaultSharedPoolID tests that NewMeteringWriter uses default SharedPoolID
+func TestDefaultSharedPoolID(t *testing.T) {
+	mockProvider := NewMockStorageProvider()
+	cfg := config.DefaultConfig()
+
+	// Create writer using the original constructor (should now use default SharedPoolID)
+	meteringWriter := NewMeteringWriter(mockProvider, cfg)
+	defer meteringWriter.Close()
+
+	// Create test data
+	testData := &common.MeteringData{
+		Timestamp: 1640995200,
+		Category:  "storage",
+		SelfID:    "tikv001",
+		Data: []map[string]interface{}{
+			{
+				"logical_cluster_id": "lc-test",
+				"disk_usage":         &common.MeteringValue{Value: 100, Unit: "GB"},
+			},
+		},
+	}
+
+	// Write should succeed because default SharedPoolID is used
+	ctx := context.Background()
+	err := meteringWriter.Write(ctx, testData)
+	assert.NoError(t, err, "Write should succeed with default SharedPoolID")
+
+	// Verify correct path with default SharedPoolID
+	expectedPath := "metering/ru/1640995200/storage/default-shared-pool/tikv001-0.json.gz"
+	_, exists := mockProvider.uploadedData[expectedPath]
+	assert.True(t, exists, "Expected file not found at path: %s", expectedPath)
+
+	// Verify file content contains default SharedPoolID
+	compressedData := mockProvider.uploadedData[expectedPath]
+	assert.NotEmpty(t, compressedData, "File data should not be empty")
+
+	// Decompress and verify content
+	reader := bytes.NewReader(compressedData)
+	gzipReader, err := gzip.NewReader(reader)
+	assert.NoError(t, err, "Should be able to create gzip reader")
+	defer gzipReader.Close()
+
+	decompressedData, err := io.ReadAll(gzipReader)
+	assert.NoError(t, err, "Should be able to decompress data")
+
+	var pageData pageMeteringData
+	err = json.Unmarshal(decompressedData, &pageData)
+	assert.NoError(t, err, "Should be able to unmarshal page data")
+
+	// Verify default SharedPoolID is used
+	assert.Equal(t, DefaultSharedPoolID, pageData.SharedPoolID, "Should use default SharedPoolID")
+
+	t.Logf("✓ NewMeteringWriter correctly uses default SharedPoolID: %s", pageData.SharedPoolID)
 }
