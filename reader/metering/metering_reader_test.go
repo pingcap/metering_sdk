@@ -103,7 +103,7 @@ func TestMeteringReader_Read(t *testing.T) {
 	compressedData, err := createCompressedTestData(testData)
 	assert.NoError(t, err, "Failed to create test data")
 
-	path := "metering/ru/1755687660/tidb-server/server-001-0.json.gz"
+	path := "metering/ru/1755687660/tidb-server/pool-cluster-001/server-001-0.json.gz"
 	provider.files[path] = compressedData
 
 	cfg := &config.Config{
@@ -137,11 +137,11 @@ func TestMeteringReader_FileNotFound(t *testing.T) {
 func TestMeteringReader_List(t *testing.T) {
 	provider := newMockObjectStorageProvider()
 
-	// Create test files
+	// Create test files - using new format with SharedPoolID
 	testFiles := []string{
-		"metering/ru/1755687660/tidb-server/server-001-0.json.gz",
-		"metering/ru/1755687720/tidb-server/server-001-0.json.gz",
-		"metering/ru/1755687780/pd-server/server-001-0.json.gz",
+		"metering/ru/1755687660/tidb-server/pool-cluster-001/server-001-0.json.gz",
+		"metering/ru/1755687720/tidb-server/pool-cluster-001/server-001-0.json.gz",
+		"metering/ru/1755687780/pd-server/pool-cluster-003/server-001-0.json.gz",
 	}
 
 	for _, file := range testFiles {
@@ -186,25 +186,27 @@ func TestMeteringReader_GetFileInfo(t *testing.T) {
 	}{
 		{
 			name:     "valid file path",
-			filePath: "metering/ru/1755687660/tidbserver/server001-0.json.gz",
+			filePath: "metering/ru/1755687660/tidbserver/pool-cluster-001/server001-0.json.gz",
 			expected: &MeteringFileInfo{
-				Path:      "metering/ru/1755687660/tidbserver/server001-0.json.gz",
-				Timestamp: 1755687660,
-				Category:  "tidbserver",
-				SelfID:    "server001",
-				Part:      0,
+				Path:         "metering/ru/1755687660/tidbserver/pool-cluster-001/server001-0.json.gz",
+				Timestamp:    1755687660,
+				Category:     "tidbserver",
+				SharedPoolID: "pool-cluster-001",
+				SelfID:       "server001",
+				Part:         0,
 			},
 			wantErr: false,
 		},
 		{
 			name:     "valid file path with tikv",
-			filePath: "metering/ru/1755687660/tikv/tikv002-1.json.gz",
+			filePath: "metering/ru/1755687660/tikv/pool-cluster-002/tikv002-1.json.gz",
 			expected: &MeteringFileInfo{
-				Path:      "metering/ru/1755687660/tikv/tikv002-1.json.gz",
-				Timestamp: 1755687660,
-				Category:  "tikv",
-				SelfID:    "tikv002",
-				Part:      1,
+				Path:         "metering/ru/1755687660/tikv/pool-cluster-002/tikv002-1.json.gz",
+				Timestamp:    1755687660,
+				Category:     "tikv",
+				SharedPoolID: "pool-cluster-002",
+				SelfID:       "tikv002",
+				Part:         1,
 			},
 			wantErr: false,
 		},
@@ -222,7 +224,13 @@ func TestMeteringReader_GetFileInfo(t *testing.T) {
 		},
 		{
 			name:     "self_id contains dash",
-			filePath: "metering/ru/1755687660/tidbserver/server-001-0.json.gz",
+			filePath: "metering/ru/1755687660/tidbserver/pool-cluster-001/server-001-0.json.gz",
+			expected: nil,
+			wantErr:  true,
+		},
+		{
+			name:     "old format without shared pool id should fail",
+			filePath: "metering/ru/1755687660/tidbserver/server001-0.json.gz",
 			expected: nil,
 			wantErr:  true,
 		},
@@ -242,6 +250,7 @@ func TestMeteringReader_GetFileInfo(t *testing.T) {
 					assert.Equal(t, tt.expected.Path, result.Path, "Expected Path %s, but got %s", tt.expected.Path, result.Path)
 					assert.Equal(t, tt.expected.Timestamp, result.Timestamp, "Expected Timestamp %d, but got %d", tt.expected.Timestamp, result.Timestamp)
 					assert.Equal(t, tt.expected.Category, result.Category, "Expected Category %s, but got %s", tt.expected.Category, result.Category)
+					assert.Equal(t, tt.expected.SharedPoolID, result.SharedPoolID, "Expected SharedPoolID %s, but got %s", tt.expected.SharedPoolID, result.SharedPoolID)
 					assert.Equal(t, tt.expected.SelfID, result.SelfID, "Expected SelfID %s, but got %s", tt.expected.SelfID, result.SelfID)
 					assert.Equal(t, tt.expected.Part, result.Part, "Expected Part %d, but got %d", tt.expected.Part, result.Part)
 				}
@@ -258,13 +267,13 @@ func TestMeteringReader_ListFilesByTimestamp(t *testing.T) {
 	}
 	meteringReader := NewMeteringReader(provider, cfg)
 
-	// Mock file data
+	// Mock file data - now using new format with SharedPoolID
 	testFiles := []string{
-		"metering/ru/1755687660/tidbserver/server001-0.json.gz",
-		"metering/ru/1755687660/tidbserver/server002-0.json.gz",
-		"metering/ru/1755687660/tikv/tikv001-0.json.gz",
-		"metering/ru/1755687660/tikv/tikv002-0.json.gz",
-		"metering/ru/1755687660/pd/pd001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/pool-cluster-001/server001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/pool-cluster-001/server002-0.json.gz",
+		"metering/ru/1755687660/tikv/pool-cluster-002/tikv001-0.json.gz",
+		"metering/ru/1755687660/tikv/pool-cluster-002/tikv002-0.json.gz",
+		"metering/ru/1755687660/pd/pool-cluster-003/pd001-0.json.gz",
 	}
 
 	// Create mock files
@@ -303,11 +312,11 @@ func TestMeteringReader_GetCategories(t *testing.T) {
 	}
 	meteringReader := NewMeteringReader(provider, cfg)
 
-	// Mock file data
+	// Mock file data - now using new format with SharedPoolID
 	testFiles := []string{
-		"metering/ru/1755687660/tidbserver/server001-0.json.gz",
-		"metering/ru/1755687660/tikv/tikv001-0.json.gz",
-		"metering/ru/1755687660/pd/pd001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/pool-cluster-001/server001-0.json.gz",
+		"metering/ru/1755687660/tikv/pool-cluster-002/tikv001-0.json.gz",
+		"metering/ru/1755687660/pd/pool-cluster-003/pd001-0.json.gz",
 	}
 
 	for _, filePath := range testFiles {
@@ -336,11 +345,11 @@ func TestMeteringReader_GetFilesByCategory(t *testing.T) {
 	}
 	meteringReader := NewMeteringReader(provider, cfg)
 
-	// Mock file data
+	// Mock file data - now using new format with SharedPoolID
 	testFiles := []string{
-		"metering/ru/1755687660/tidbserver/server001-0.json.gz",
-		"metering/ru/1755687660/tidbserver/server002-0.json.gz",
-		"metering/ru/1755687660/tikv/tikv001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/pool-cluster-001/server001-0.json.gz",
+		"metering/ru/1755687660/tidbserver/pool-cluster-001/server002-0.json.gz",
+		"metering/ru/1755687660/tikv/pool-cluster-002/tikv001-0.json.gz",
 	}
 
 	for _, filePath := range testFiles {

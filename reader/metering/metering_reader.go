@@ -22,11 +22,12 @@ import (
 
 // MeteringFileInfo metering file information
 type MeteringFileInfo struct {
-	Path      string `json:"path"`      // Complete file path
-	Timestamp int64  `json:"timestamp"` // Timestamp
-	Category  string `json:"category"`  // Service category
-	SelfID    string `json:"self_id"`   // Component ID
-	Part      int    `json:"part"`      // Part number
+	Path         string `json:"path"`           // Complete file path
+	Timestamp    int64  `json:"timestamp"`      // Timestamp
+	Category     string `json:"category"`       // Service category
+	SharedPoolID string `json:"shared_pool_id"` // Shared pool cluster ID
+	SelfID       string `json:"self_id"`        // Component ID
+	Part         int    `json:"part"`           // Part number
 }
 
 // TimestampFiles file information organized by timestamp
@@ -57,7 +58,9 @@ func NewMeteringReader(provider storage.ObjectStorageProvider, cfg *config.Confi
 }
 
 // ListFilesByTimestamp lists all metering file information by timestamp
-// Path format: /metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
+// Path format: /metering/ru/{timestamp}/{category}/{shared_pool_id}/{self_id}-{part}.json.gz (new format)
+//
+//	/metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz (old format for backward compatibility)
 func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int64) (*TimestampFiles, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -81,39 +84,40 @@ func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int
 		Files:     make(map[string][]string),
 	}
 
-	// File path format: metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
-	// Since self_id does not contain dashes, parsing becomes simple
-	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^-]+)-(\d+)\.json\.gz$`)
+	// Only support new path format with SharedPoolID
+	// Path format: metering/ru/{timestamp}/{category}/{shared_pool_id}/{self_id}-{part}.json.gz
+	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^/]+)/([^-]+)-(\d+)\.json\.gz$`)
 
 	for _, filePath := range files {
 		matches := pathRegex.FindStringSubmatch(filePath)
-		if len(matches) != 5 {
-			r.logger.Warn("Invalid file path format, skipping",
-				zap.String("path", filePath),
+		if len(matches) == 6 {
+			fileTimestamp, _ := strconv.ParseInt(matches[1], 10, 64)
+			if fileTimestamp != timestamp {
+				continue // Skip non-matching timestamps
+			}
+
+			category := matches[2]
+			selfID := matches[4]
+			//TODO improve selfID validation
+			if strings.Contains(selfID, "-") {
+				r.logger.Warn("Invalid self_id contains dash, skipping",
+					zap.String("path", filePath),
+					zap.String("self_id", selfID),
+				)
+				continue
+			}
+
+			// Add file path
+			result.Files[category] = append(
+				result.Files[category],
+				filePath,
 			)
 			continue
 		}
 
-		fileTimestamp, _ := strconv.ParseInt(matches[1], 10, 64)
-		if fileTimestamp != timestamp {
-			continue // Skip non-matching timestamps
-		}
-
-		category := matches[2]
-		selfID := matches[3]
-		//TODO improve selfID validation
-		if strings.Contains(selfID, "-") {
-			r.logger.Warn("Invalid self_id contains dash, skipping",
-				zap.String("path", filePath),
-				zap.String("self_id", selfID),
-			)
-			continue
-		}
-
-		// Add file path
-		result.Files[category] = append(
-			result.Files[category],
-			filePath,
+		// Log warning for unrecognized path format
+		r.logger.Warn("Unrecognized file path format, skipping",
+			zap.String("path", filePath),
 		)
 	}
 
@@ -133,38 +137,40 @@ func (r *MeteringReader) ListFilesByTimestamp(ctx context.Context, timestamp int
 
 // GetFileInfo parses file path and returns file information
 func (r *MeteringReader) GetFileInfo(filePath string) (*MeteringFileInfo, error) {
-	// File path format: metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
-	// Since self_id does not contain dashes, parsing becomes simple
-	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^-]+)-(\d+)\.json\.gz$`)
+	// Only support new path format with SharedPoolID
+	// Path format: metering/ru/{timestamp}/{category}/{shared_pool_id}/{self_id}-{part}.json.gz
+	pathRegex := regexp.MustCompile(`^metering/ru/(\d+)/([^/]+)/([^/]+)/([^-]+)-(\d+)\.json\.gz$`)
 
 	matches := pathRegex.FindStringSubmatch(filePath)
-	if len(matches) != 5 {
-		return nil, fmt.Errorf("invalid file path format: %s", filePath)
+	if len(matches) == 6 {
+		timestamp, err := strconv.ParseInt(matches[1], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timestamp in path %s: %w", filePath, err)
+		}
+
+		category := matches[2]
+		sharedPoolID := matches[3]
+		selfID := matches[4]
+		part, err := strconv.Atoi(matches[5])
+		if err != nil {
+			return nil, fmt.Errorf("invalid part number in path %s: %w", filePath, err)
+		}
+
+		if strings.Contains(selfID, "-") {
+			return nil, fmt.Errorf("self_id cannot contain dash character: %s", selfID)
+		}
+
+		return &MeteringFileInfo{
+			Path:         filePath,
+			Timestamp:    timestamp,
+			Category:     category,
+			SharedPoolID: sharedPoolID,
+			SelfID:       selfID,
+			Part:         part,
+		}, nil
 	}
 
-	timestamp, err := strconv.ParseInt(matches[1], 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid timestamp in path %s: %w", filePath, err)
-	}
-
-	category := matches[2]
-	selfID := matches[3]
-	part, err := strconv.Atoi(matches[4])
-	if err != nil {
-		return nil, fmt.Errorf("invalid part number in path %s: %w", filePath, err)
-	}
-
-	if strings.Contains(selfID, "-") {
-		return nil, fmt.Errorf("self_id cannot contain dash character: %s", selfID)
-	}
-
-	return &MeteringFileInfo{
-		Path:      filePath,
-		Timestamp: timestamp,
-		Category:  category,
-		SelfID:    selfID,
-		Part:      part,
-	}, nil
+	return nil, fmt.Errorf("invalid file path format: %s", filePath)
 }
 
 // ReadFile reads and parses metering data file at the specified path

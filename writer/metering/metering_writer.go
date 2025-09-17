@@ -18,25 +18,32 @@ import (
 
 // pageMeteringData paginated metering data structure
 type pageMeteringData struct {
-	Timestamp int64                    `json:"timestamp"` // minute-level timestamp
-	Category  string                   `json:"category"`  // service category identifier
-	SelfID    string                   `json:"self_id"`   // component ID
-	Part      int                      `json:"part"`      // pagination number
-	Data      []map[string]interface{} `json:"data"`      // current page logical cluster metering data
+	Timestamp    int64                    `json:"timestamp"`      // minute-level timestamp
+	Category     string                   `json:"category"`       // service category identifier
+	SelfID       string                   `json:"self_id"`        // component ID
+	SharedPoolID string                   `json:"shared_pool_id"` // shared pool cluster ID
+	Part         int                      `json:"part"`           // pagination number
+	Data         []map[string]interface{} `json:"data"`           // current page logical cluster metering data
 }
 
 // MeteringWriter metering data writer
 type MeteringWriter struct {
-	provider   storage.ObjectStorageProvider
-	config     *config.Config
-	logger     *zap.Logger
-	gzipWriter *gzip.Writer
-	buffer     *bytes.Buffer
-	mu         sync.Mutex // protects gzipWriter and buffer from concurrent access
+	provider     storage.ObjectStorageProvider
+	config       *config.Config
+	logger       *zap.Logger
+	gzipWriter   *gzip.Writer
+	buffer       *bytes.Buffer
+	mu           sync.Mutex // protects gzipWriter and buffer from concurrent access
+	sharedPoolID string     // shared pool cluster ID for path construction
 }
 
 // NewMeteringWriter creates a new metering data writer
 func NewMeteringWriter(provider storage.ObjectStorageProvider, cfg *config.Config) *MeteringWriter {
+	return NewMeteringWriterWithSharedPool(provider, cfg, "")
+}
+
+// NewMeteringWriterWithSharedPool creates a new metering data writer with shared pool ID
+func NewMeteringWriterWithSharedPool(provider storage.ObjectStorageProvider, cfg *config.Config, sharedPoolID string) *MeteringWriter {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
@@ -45,12 +52,22 @@ func NewMeteringWriter(provider storage.ObjectStorageProvider, cfg *config.Confi
 	gzipWriter := gzip.NewWriter(buffer)
 
 	return &MeteringWriter{
-		provider:   provider,
-		config:     cfg,
-		logger:     cfg.GetLogger(),
-		gzipWriter: gzipWriter,
-		buffer:     buffer,
+		provider:     provider,
+		config:       cfg,
+		logger:       cfg.GetLogger(),
+		gzipWriter:   gzipWriter,
+		buffer:       buffer,
+		sharedPoolID: sharedPoolID,
 	}
+}
+
+// NewMeteringWriterFromConfig creates a new metering data writer from MeteringConfig
+func NewMeteringWriterFromConfig(provider storage.ObjectStorageProvider, cfg *config.Config, meteringConfig *config.MeteringConfig) *MeteringWriter {
+	var sharedPoolID string
+	if meteringConfig != nil {
+		sharedPoolID = meteringConfig.GetSharedPoolID()
+	}
+	return NewMeteringWriterWithSharedPool(provider, cfg, sharedPoolID)
 }
 
 // Write implements Writer interface, writes metering data
@@ -58,6 +75,16 @@ func (w *MeteringWriter) Write(ctx context.Context, data interface{}) error {
 	meteringData, ok := data.(*common.MeteringData)
 	if !ok {
 		return fmt.Errorf("invalid data type, expected *MeteringData")
+	}
+
+	// Fill SharedPoolID from writer configuration if not set
+	if meteringData.SharedPoolID == "" {
+		meteringData.SharedPoolID = w.sharedPoolID
+	}
+
+	// Validate that SharedPoolID is not empty
+	if meteringData.SharedPoolID == "" {
+		return fmt.Errorf("SharedPoolID is required and cannot be empty")
 	}
 
 	// Validate IDs do not contain hyphens
@@ -72,6 +99,7 @@ func (w *MeteringWriter) Write(ctx context.Context, data interface{}) error {
 	w.logger.Debug("Writing metering data",
 		zap.Int64("timestamp", meteringData.Timestamp),
 		zap.String("category", meteringData.Category),
+		zap.String("shared_pool_id", meteringData.SharedPoolID),
 		zap.Int("logical_clusters_count", len(meteringData.Data)),
 	)
 
@@ -110,11 +138,12 @@ func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *
 		if len(currentPage) > 0 && currentSize+clusterSize > w.config.PageSizeBytes {
 			// Write current page
 			pageData := &pageMeteringData{
-				Timestamp: meteringData.Timestamp,
-				Category:  meteringData.Category,
-				SelfID:    meteringData.SelfID,
-				Part:      pageNum,
-				Data:      currentPage,
+				Timestamp:    meteringData.Timestamp,
+				Category:     meteringData.Category,
+				SelfID:       meteringData.SelfID,
+				SharedPoolID: meteringData.SharedPoolID,
+				Part:         pageNum,
+				Data:         currentPage,
 			}
 
 			if err := w.writePageData(ctx, pageData); err != nil {
@@ -135,11 +164,12 @@ func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *
 	// Write last page (if there is data)
 	if len(currentPage) > 0 {
 		pageData := &pageMeteringData{
-			Timestamp: meteringData.Timestamp,
-			Category:  meteringData.Category,
-			SelfID:    meteringData.SelfID,
-			Part:      pageNum,
-			Data:      currentPage,
+			Timestamp:    meteringData.Timestamp,
+			Category:     meteringData.Category,
+			SelfID:       meteringData.SelfID,
+			SharedPoolID: meteringData.SharedPoolID,
+			Part:         pageNum,
+			Data:         currentPage,
 		}
 
 		if err := w.writePageData(ctx, pageData); err != nil {
@@ -158,11 +188,12 @@ func (w *MeteringWriter) writeWithPagination(ctx context.Context, meteringData *
 // writeSinglePage writes a single page of data (no pagination)
 func (w *MeteringWriter) writeSinglePage(ctx context.Context, meteringData *common.MeteringData) error {
 	pageData := &pageMeteringData{
-		Timestamp: meteringData.Timestamp,
-		Category:  meteringData.Category,
-		SelfID:    meteringData.SelfID,
-		Part:      0,
-		Data:      meteringData.Data,
+		Timestamp:    meteringData.Timestamp,
+		Category:     meteringData.Category,
+		SelfID:       meteringData.SelfID,
+		SharedPoolID: meteringData.SharedPoolID,
+		Part:         0,
+		Data:         meteringData.Data,
 	}
 
 	return w.writePageData(ctx, pageData)
@@ -170,10 +201,16 @@ func (w *MeteringWriter) writeSinglePage(ctx context.Context, meteringData *comm
 
 // writePageData writes page data
 func (w *MeteringWriter) writePageData(ctx context.Context, pageData *pageMeteringData) error {
-	// Build path: /metering/ru/{timestamp}/{category}/{self_id}-{part}.json.gz
-	path := fmt.Sprintf("metering/ru/%d/%s/%s-%d.json.gz",
+	// Validate that SharedPoolID is not empty
+	if pageData.SharedPoolID == "" {
+		return fmt.Errorf("SharedPoolID is required and cannot be empty")
+	}
+
+	// Build path: /metering/ru/{timestamp}/{category}/{shared_pool_id}/{self_id}-{part}.json.gz
+	path := fmt.Sprintf("metering/ru/%d/%s/%s/%s-%d.json.gz",
 		pageData.Timestamp,
 		pageData.Category,
+		pageData.SharedPoolID,
 		pageData.SelfID,
 		pageData.Part,
 	)

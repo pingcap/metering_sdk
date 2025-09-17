@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"testing"
 	"time"
 
@@ -232,7 +231,7 @@ func decompressAndVerify(t *testing.T, compressedData []byte, expectedJSON []byt
 func TestMeteringWriterGzipReuse(t *testing.T) {
 	mockProvider := NewMockStorageProvider()
 	cfg := config.NewDebugConfig()
-	meteringWriter := NewMeteringWriter(mockProvider, cfg)
+	meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "pool-cluster-001")
 	defer meteringWriter.Close()
 
 	ctx := context.Background()
@@ -293,9 +292,10 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 			assert.NoError(t, err, "Write failed")
 
 			// Verify data is correctly uploaded (default part=0, since no pagination is set)
-			expectedPath := fmt.Sprintf("metering/ru/%d/%s/%s-%d.json.gz",
+			expectedPath := fmt.Sprintf("metering/ru/%d/%s/%s/%s-%d.json.gz",
 				data.Timestamp,
 				data.Category,
+				"pool-cluster-001",
 				data.SelfID,
 				0, // default part number
 			)
@@ -306,11 +306,12 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 			// Verify correctness of compressed data
 			// Note: data is now wrapped in pageMeteringData structure
 			expectedPageData := &pageMeteringData{
-				Timestamp: data.Timestamp,
-				Category:  data.Category,
-				SelfID:    data.SelfID,
-				Part:      0,
-				Data:      data.Data,
+				Timestamp:    data.Timestamp,
+				Category:     data.Category,
+				SelfID:       data.SelfID,
+				SharedPoolID: "pool-cluster-001",
+				Part:         0,
+				Data:         data.Data,
 			}
 			expectedJSON, _ := json.Marshal(expectedPageData)
 			decompressAndVerify(t, uploadedData, expectedJSON)
@@ -321,7 +322,7 @@ func TestMeteringWriterGzipReuse(t *testing.T) {
 func TestMeteringWriterConcurrency(t *testing.T) {
 	mockProvider := NewMockStorageProvider()
 	cfg := config.NewDebugConfig()
-	meteringWriter := NewMeteringWriter(mockProvider, cfg)
+	meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "pool-cluster-test")
 	defer meteringWriter.Close()
 
 	ctx := context.Background()
@@ -369,7 +370,7 @@ func TestMeteringWriterPagination(t *testing.T) {
 	t.Run("no pagination when page size not set", func(t *testing.T) {
 		mockProvider := NewMockStorageProvider()
 		cfg := config.DefaultConfig() // No page size set
-		meteringWriter := NewMeteringWriter(mockProvider, cfg)
+		meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "test-pool")
 		defer meteringWriter.Close()
 
 		ctx := context.Background()
@@ -402,21 +403,22 @@ func TestMeteringWriterPagination(t *testing.T) {
 		// Should have only one file (part=0)
 		assert.Equal(t, 1, len(mockProvider.uploadedData), "Expected 1 file, got %d", len(mockProvider.uploadedData))
 
-		// Check file path format
-		found := false
-		for path := range mockProvider.uploadedData {
-			if strings.Contains(path, testData.Category) && strings.Contains(path, testData.SelfID) {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "Expected file not found")
+		// Check file path format - should include SharedPoolID
+		expectedPath := fmt.Sprintf("metering/ru/%d/%s/%s/%s-%d.json.gz",
+			testData.Timestamp,
+			testData.Category,
+			"test-pool",
+			testData.SelfID,
+			0, // part number
+		)
+		_, found := mockProvider.uploadedData[expectedPath]
+		assert.True(t, found, "Expected file not found at path: %s", expectedPath)
 	})
 
 	t.Run("pagination when data exceeds page size", func(t *testing.T) {
 		mockProvider := NewMockStorageProvider()
 		cfg := config.DefaultConfig().WithPageSize(100) // Very small page size to trigger pagination
-		meteringWriter := NewMeteringWriter(mockProvider, cfg)
+		meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "test-pool-paginate")
 		defer meteringWriter.Close()
 
 		ctx := context.Background()
@@ -458,7 +460,7 @@ func TestMeteringWriterPagination(t *testing.T) {
 	t.Run("single logical cluster per page when very small page size", func(t *testing.T) {
 		mockProvider := NewMockStorageProvider()
 		cfg := config.DefaultConfig().WithPageSize(10) // Extremely small page size
-		meteringWriter := NewMeteringWriter(mockProvider, cfg)
+		meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "test-pool-small")
 		defer meteringWriter.Close()
 
 		ctx := context.Background()
@@ -490,4 +492,176 @@ func TestMeteringWriterPagination(t *testing.T) {
 
 		t.Logf("Created %d files, one per logical cluster", len(mockProvider.uploadedData))
 	})
+}
+
+func TestMeteringWriterWithSharedPoolID(t *testing.T) {
+	mockProvider := NewMockStorageProvider()
+	cfg := config.DefaultConfig()
+
+	t.Run("with_shared_pool_id", func(t *testing.T) {
+		// Reset mock provider
+		mockProvider.uploadedData = make(map[string][]byte)
+
+		// Create writer with shared pool ID
+		meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "pool-cluster-001")
+		defer meteringWriter.Close()
+
+		// Create test data
+		testData := &common.MeteringData{
+			Timestamp: 1640995200, // 2022-01-01 00:00:00
+			Category:  "tidbserver",
+			SelfID:    "server001",
+			Data: []map[string]interface{}{
+				{
+					"logical_cluster_id": "lc-001",
+					"cpu":                &common.MeteringValue{Value: 80, Unit: "percent"},
+					"memory":             &common.MeteringValue{Value: 2048, Unit: "MB"},
+				},
+			},
+		}
+
+		// Write data
+		ctx := context.Background()
+		err := meteringWriter.Write(ctx, testData)
+		assert.NoError(t, err, "Write should succeed")
+
+		// Verify file was created with correct path
+		expectedPath := "metering/ru/1640995200/tidbserver/pool-cluster-001/server001-0.json.gz"
+		assert.Equal(t, 1, len(mockProvider.uploadedData), "Expected 1 file")
+
+		// Check if the expected path exists
+		_, exists := mockProvider.uploadedData[expectedPath]
+		assert.True(t, exists, "Expected file not found at path: %s", expectedPath)
+
+		t.Logf("✓ Should include shared pool ID in path: File created at correct path: %s", expectedPath)
+
+		// Verify file content
+		compressedData := mockProvider.uploadedData[expectedPath]
+		assert.NotEmpty(t, compressedData, "File data should not be empty")
+
+		// Decompress and verify content
+		reader := bytes.NewReader(compressedData)
+		gzipReader, err := gzip.NewReader(reader)
+		assert.NoError(t, err, "Should be able to create gzip reader")
+		defer gzipReader.Close()
+
+		decompressedData, err := io.ReadAll(gzipReader)
+		assert.NoError(t, err, "Should be able to decompress data")
+
+		var pageData pageMeteringData
+		err = json.Unmarshal(decompressedData, &pageData)
+		assert.NoError(t, err, "Should be able to unmarshal page data")
+
+		// Verify page data content
+		assert.Equal(t, testData.Timestamp, pageData.Timestamp, "Timestamp should match")
+		assert.Equal(t, testData.Category, pageData.Category, "Category should match")
+		assert.Equal(t, testData.SelfID, pageData.SelfID, "SelfID should match")
+		assert.Equal(t, "pool-cluster-001", pageData.SharedPoolID, "SharedPoolID should match")
+		assert.Equal(t, 0, pageData.Part, "Part should be 0")
+		assert.Equal(t, len(testData.Data), len(pageData.Data), "Data length should match")
+	})
+
+	t.Run("empty_shared_pool_id_should_fail", func(t *testing.T) {
+		// Reset mock provider
+		mockProvider.uploadedData = make(map[string][]byte)
+
+		// Create writer with empty shared pool ID
+		meteringWriter := NewMeteringWriterWithSharedPool(mockProvider, cfg, "")
+		defer meteringWriter.Close()
+
+		// Create test data
+		testData := &common.MeteringData{
+			Timestamp: 1640995200,
+			Category:  "tidbserver",
+			SelfID:    "server001",
+			Data: []map[string]interface{}{
+				{
+					"logical_cluster_id": "lc-001",
+					"cpu":                &common.MeteringValue{Value: 80, Unit: "percent"},
+				},
+			},
+		}
+
+		// Write should fail because SharedPoolID is required
+		ctx := context.Background()
+		err := meteringWriter.Write(ctx, testData)
+		assert.Error(t, err, "Write should fail when SharedPoolID is empty")
+		assert.Contains(t, err.Error(), "SharedPoolID is required and cannot be empty")
+
+		// Verify no data was uploaded
+		assert.Empty(t, mockProvider.uploadedData, "No data should be uploaded when SharedPoolID is empty")
+
+		t.Logf("✓ Correctly rejected write with empty SharedPoolID: %v", err)
+	})
+}
+
+func TestNewMeteringWriterFromConfig(t *testing.T) {
+	mockProvider := NewMockStorageProvider()
+	cfg := config.DefaultConfig()
+
+	// Create MeteringConfig with SharedPoolID
+	meteringConfig := config.NewMeteringConfig().WithSharedPoolID("test-pool-123")
+
+	// Create writer from config
+	meteringWriter := NewMeteringWriterFromConfig(mockProvider, cfg, meteringConfig)
+	defer meteringWriter.Close()
+
+	// Create test data
+	testData := &common.MeteringData{
+		Timestamp: 1640995200,
+		Category:  "storage",
+		SelfID:    "tikv001",
+		Data: []map[string]interface{}{
+			{
+				"logical_cluster_id": "lc-production",
+				"disk_usage":         &common.MeteringValue{Value: 500, Unit: "GB"},
+			},
+		},
+	}
+
+	// Write data
+	ctx := context.Background()
+	err := meteringWriter.Write(ctx, testData)
+	assert.NoError(t, err, "Write should succeed")
+
+	// Verify correct path with shared pool ID
+	expectedPath := "metering/ru/1640995200/storage/test-pool-123/tikv001-0.json.gz"
+	_, exists := mockProvider.uploadedData[expectedPath]
+	assert.True(t, exists, "Expected file not found at path: %s", expectedPath)
+
+	t.Logf("✓ MeteringConfig with SharedPoolID correctly applied: %s", expectedPath)
+}
+
+// TestSharedPoolIDRequired tests that SharedPoolID is required for all writes
+func TestSharedPoolIDRequired(t *testing.T) {
+	mockProvider := NewMockStorageProvider()
+	cfg := config.DefaultConfig()
+
+	// Create writer without SharedPoolID
+	meteringWriter := NewMeteringWriter(mockProvider, cfg)
+	defer meteringWriter.Close()
+
+	// Create test data without SharedPoolID
+	testData := &common.MeteringData{
+		Timestamp: 1640995200,
+		Category:  "storage",
+		SelfID:    "tikv001",
+		Data: []map[string]interface{}{
+			{
+				"logical_cluster_id": "lc-test",
+				"disk_usage":         &common.MeteringValue{Value: 100, Unit: "GB"},
+			},
+		},
+	}
+
+	// Write should fail because SharedPoolID is required
+	ctx := context.Background()
+	err := meteringWriter.Write(ctx, testData)
+	assert.Error(t, err, "Write should fail when SharedPoolID is empty")
+	assert.Contains(t, err.Error(), "SharedPoolID is required and cannot be empty")
+
+	// Verify no data was uploaded
+	assert.Empty(t, mockProvider.uploadedData, "No data should be uploaded when SharedPoolID is empty")
+
+	t.Logf("✓ Correctly rejected write without SharedPoolID: %v", err)
 }
