@@ -93,7 +93,7 @@ func TestMeteringWriterWithLocalFS(t *testing.T) {
 	assert.NoError(t, err, "Failed to create LocalFS provider")
 
 	// Create writer
-	meteringWriter := meteringwriter.NewMeteringWriter(provider, cfg)
+	meteringWriter := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "test-shared-pool-1")
 	defer meteringWriter.Close()
 
 	// Create test data
@@ -116,7 +116,7 @@ func TestMeteringWriterWithLocalFS(t *testing.T) {
 
 	// Verify file is created
 	expectedPath := filepath.Join(tempDir, "metering", "ru",
-		fmt.Sprintf("%d", testData.Timestamp), "test",
+		fmt.Sprintf("%d", testData.Timestamp), "test", "test-shared-pool-1",
 		fmt.Sprintf("%s-0.json.gz", testData.SelfID))
 
 	_, err = os.Stat(expectedPath)
@@ -378,7 +378,7 @@ func TestMeteringReaderWithLocalFS(t *testing.T) {
 	assert.NoError(t, err, "Failed to create LocalFS provider")
 
 	// First write some test data using the writer
-	meteringWriter := meteringwriter.NewMeteringWriter(provider, cfg)
+	meteringWriter := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "test-shared-pool-2")
 	defer meteringWriter.Close()
 
 	// Create test data
@@ -541,7 +541,7 @@ func TestMeteringReadWriteRoundtripWithLocalFS(t *testing.T) {
 	assert.NoError(t, err, "Failed to create LocalFS provider")
 
 	// Create writer and reader
-	meteringWriter := meteringwriter.NewMeteringWriter(provider, cfg)
+	meteringWriter := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "test-shared-pool")
 	defer meteringWriter.Close()
 	meteringReader := meteringreader.NewMeteringReader(provider, cfg)
 
@@ -609,8 +609,8 @@ func TestMeteringReadWriteRoundtripWithLocalFS(t *testing.T) {
 		assert.NoError(t, err, "Failed to write test data for %s/%s", tc.category, tc.selfID)
 
 		// Expected file path for verification
-		expectedPath := fmt.Sprintf("metering/ru/%d/%s/%s-0.json.gz",
-			tc.timestamp, tc.category, tc.selfID)
+		expectedPath := fmt.Sprintf("metering/ru/%d/%s/%s/%s-0.json.gz",
+			tc.timestamp, tc.category, "test-shared-pool", tc.selfID)
 		writtenFiles[expectedPath] = testData
 	}
 

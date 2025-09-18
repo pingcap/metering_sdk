@@ -24,10 +24,11 @@ type MeteringValue struct {
 
 // MeteringData metering data structure
 type MeteringData struct {
-	Timestamp int64                    `json:"timestamp"` // minute-level timestamp
-	Category  string                   `json:"category"`  // service category identifier
-	SelfID    string                   `json:"self_id"`   // component ID
-	Data      []map[string]interface{} `json:"data"`      // logical cluster metering data list
+	Timestamp    int64                    `json:"timestamp"`      // minute-level timestamp
+	Category     string                   `json:"category"`       // service category identifier
+	SelfID       string                   `json:"self_id"`        // component ID
+	SharedPoolID string                   `json:"shared_pool_id"` // shared pool cluster ID
+	Data         []map[string]interface{} `json:"data"`           // logical cluster metering data list
 }
 
 // MetaData metadata structure
