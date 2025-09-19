@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
@@ -29,10 +30,45 @@ type MetaReader struct {
 	mu       sync.RWMutex // Protect concurrent reads
 }
 
+// CacheType represents the cache type
+type CacheType string
+
+const (
+	// CacheTypeMemory memory cache
+	CacheTypeMemory CacheType = "memory"
+	// CacheTypeDisk disk cache
+	CacheTypeDisk CacheType = "disk"
+)
+
+// CacheConfig cache configuration for MetaReader
+type CacheConfig struct {
+	// Type cache type
+	Type CacheType `json:"type"`
+	// MaxSize maximum cache size in bytes
+	MaxSize int64 `json:"max_size"`
+	// DiskPath disk cache path (only valid for disk cache)
+	DiskPath string `json:"disk_path,omitempty"`
+	// EvictionTime access-time-based eviction time (items not accessed for longer than this time will be evicted first)
+	EvictionTime time.Duration `json:"eviction_time,omitempty"`
+}
+
+// toInternalConfig converts CacheConfig to internal cache.Config
+func (c *CacheConfig) toInternalConfig() *cache.Config {
+	if c == nil {
+		return nil
+	}
+	return &cache.Config{
+		Type:         cache.CacheType(c.Type),
+		MaxSize:      c.MaxSize,
+		DiskPath:     c.DiskPath,
+		EvictionTime: c.EvictionTime,
+	}
+}
+
 // Config metadata reader configuration
 type Config struct {
 	// Cache cache configuration (optional)
-	Cache *cache.Config `json:"cache,omitempty"`
+	Cache *CacheConfig `json:"cache,omitempty"`
 }
 
 // NewMetaReader creates a new metadata reader
@@ -49,7 +85,7 @@ func NewMetaReader(provider storage.ObjectStorageProvider, cfg *config.Config, r
 
 	// Initialize cache
 	if readerCfg != nil && readerCfg.Cache != nil {
-		c, err := cache.NewCache(readerCfg.Cache)
+		c, err := cache.NewCache(readerCfg.Cache.toInternalConfig())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cache: %w", err)
 		}
