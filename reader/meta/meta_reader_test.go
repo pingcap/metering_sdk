@@ -13,7 +13,6 @@ import (
 
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
-	"github.com/pingcap/metering_sdk/internal/cache"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
@@ -280,8 +279,8 @@ func TestMetaReader_CacheIntegration(t *testing.T) {
 
 	// Create MetaReader with cache configuration
 	cacheConfig := &Config{
-		Cache: &cache.Config{
-			Type:         cache.CacheTypeMemory,
+		Cache: &CacheConfig{
+			Type:         CacheTypeMemory,
 			MaxSize:      100 * 1024 * 1024, // 100MB
 			EvictionTime: 300 * time.Second, // Prioritize eviction after 5 minutes without access
 		},
@@ -341,8 +340,8 @@ func TestMetaReader_DiskCache(t *testing.T) {
 
 	// Create MetaReader with disk cache configuration
 	cacheConfig := &Config{
-		Cache: &cache.Config{
-			Type:         cache.CacheTypeDisk,
+		Cache: &CacheConfig{
+			Type:         CacheTypeDisk,
 			MaxSize:      100 * 1024 * 1024, // 100MB
 			EvictionTime: 300 * time.Second, // Prioritize eviction after 5 minutes without access
 			DiskPath:     tmpDir,
@@ -457,8 +456,8 @@ func TestMetaReader_CacheKeyLogic(t *testing.T) {
 
 	// Create MetaReader with cache
 	cacheConfig := &Config{
-		Cache: &cache.Config{
-			Type:    cache.CacheTypeMemory,
+		Cache: &CacheConfig{
+			Type:    CacheTypeMemory,
 			MaxSize: 100 * 1024 * 1024,
 		},
 	}
@@ -616,8 +615,8 @@ func TestMetaReader_ReadByTypeWithCache(t *testing.T) {
 
 	// Create cache config
 	cacheConfig := &Config{
-		Cache: &cache.Config{
-			Type:    cache.CacheTypeMemory,
+		Cache: &CacheConfig{
+			Type:    CacheTypeMemory,
 			MaxSize: 100 * 1024 * 1024,
 		},
 	}
