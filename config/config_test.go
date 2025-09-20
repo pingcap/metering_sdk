@@ -816,3 +816,164 @@ func TestNewFromURI_PathConstruction(t *testing.T) {
 		})
 	}
 }
+
+// TestToURI tests converting MeteringConfig to URI strings
+func TestToURI(t *testing.T) {
+	tests := []struct {
+		name   string
+		config *MeteringConfig
+		want   string
+	}{
+		{
+			name: "S3 basic",
+			config: &MeteringConfig{
+				Type:   storage.ProviderTypeS3,
+				Region: "us-east-1",
+				Bucket: "my-bucket",
+				Prefix: "data",
+			},
+			want: "s3://my-bucket/data?region-id=us-east-1",
+		},
+		{
+			name: "S3 with all AWS parameters",
+			config: &MeteringConfig{
+				Type:         storage.ProviderTypeS3,
+				Region:       "us-west-2",
+				Bucket:       "test-bucket",
+				Prefix:       "logs",
+				Endpoint:     "https://s3.example.com",
+				SharedPoolID: "pool123",
+				AWS: &MeteringAWSConfig{
+					AccessKey:        "AKIAIOSFODNN7EXAMPLE",
+					SecretAccessKey:  "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+					SessionToken:     "session123",
+					AssumeRoleARN:    "arn:aws:iam::123456789012:role/S3Access",
+					S3ForcePathStyle: true,
+				},
+			},
+			want: "s3://test-bucket/logs?access-key=AKIAIOSFODNN7EXAMPLE&assume-role-arn=arn%3Aaws%3Aiam%3A%3A123456789012%3Arole%2FS3Access&endpoint=https%3A%2F%2Fs3.example.com&region-id=us-west-2&s3-force-path-style=true&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY&session-token=session123&shared-pool-id=pool123",
+		},
+		{
+			name: "OSS basic",
+			config: &MeteringConfig{
+				Type:   storage.ProviderTypeOSS,
+				Region: "oss-ap-southeast-1",
+				Bucket: "oss-bucket",
+			},
+			want: "oss://oss-bucket?region-id=oss-ap-southeast-1",
+		},
+		{
+			name: "OSS with all parameters",
+			config: &MeteringConfig{
+				Type:   storage.ProviderTypeOSS,
+				Region: "oss-cn-hangzhou",
+				Bucket: "test-oss",
+				Prefix: "metrics",
+				OSS: &MeteringOSSConfig{
+					AccessKey:       "ExampleAccessKey",
+					SecretAccessKey: "ExampleSecretAccessKey",
+					AssumeRoleARN:   "acs:ram::123456789012:role/OSSAccess",
+				},
+			},
+			want: "oss://test-oss/metrics?access-key=ExampleAccessKey&assume-role-arn=acs%3Aram%3A%3A123456789012%3Arole%2FOSSAccess&region-id=oss-cn-hangzhou&secret-access-key=ExampleSecretAccessKey",
+		},
+		{
+			name: "LocalFS basic",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:   "/data/storage",
+					CreateDirs: true, // explicitly set to true to match default behavior
+				},
+			},
+			want: "localfs:///data/storage",
+		},
+		{
+			name: "LocalFS with parameters",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeLocalFS,
+				LocalFS: &MeteringLocalFSConfig{
+					BasePath:    "/tmp/logs",
+					CreateDirs:  false,
+					Permissions: "0755",
+				},
+			},
+			want: "localfs:///tmp/logs?create-dirs=false&permissions=0755",
+		},
+		{
+			name: "Empty config",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeS3,
+			},
+			want: "s3://",
+		},
+		{
+			name: "Unknown provider type",
+			config: &MeteringConfig{
+				Type: storage.ProviderType("unknown"),
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.ToURI()
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestToURI_RoundTrip tests that NewFromURI and ToURI are consistent
+func TestToURI_RoundTrip(t *testing.T) {
+	testURIs := []string{
+		"s3://my-bucket/data?region-id=us-east-1",
+		"oss://oss-bucket/logs?region-id=oss-ap-southeast-1&access-key=test",
+		"localfs:///data/storage?create-dirs=false&permissions=0755",
+		"s3://test?region-id=us-west-2&endpoint=https%3A%2F%2Fs3.example.com&shared-pool-id=pool123",
+	}
+
+	for _, originalURI := range testURIs {
+		t.Run(originalURI, func(t *testing.T) {
+			// Parse URI to config
+			config, err := NewFromURI(originalURI)
+			assert.NoError(t, err)
+
+			// Convert config back to URI
+			regeneratedURI := config.ToURI()
+
+			// Parse the regenerated URI again
+			configFromRegenerated, err := NewFromURI(regeneratedURI)
+			assert.NoError(t, err)
+
+			// Compare the two configs (they should be functionally equivalent)
+			assert.Equal(t, config.Type, configFromRegenerated.Type)
+			assert.Equal(t, config.Region, configFromRegenerated.Region)
+			assert.Equal(t, config.Bucket, configFromRegenerated.Bucket)
+			assert.Equal(t, config.Prefix, configFromRegenerated.Prefix)
+			assert.Equal(t, config.Endpoint, configFromRegenerated.Endpoint)
+			assert.Equal(t, config.SharedPoolID, configFromRegenerated.SharedPoolID)
+
+			// Compare provider-specific configs
+			switch config.Type {
+			case storage.ProviderTypeS3:
+				if config.AWS != nil && configFromRegenerated.AWS != nil {
+					assert.Equal(t, config.AWS.AccessKey, configFromRegenerated.AWS.AccessKey)
+					assert.Equal(t, config.AWS.AssumeRoleARN, configFromRegenerated.AWS.AssumeRoleARN)
+					assert.Equal(t, config.AWS.S3ForcePathStyle, configFromRegenerated.AWS.S3ForcePathStyle)
+				}
+			case storage.ProviderTypeOSS:
+				if config.OSS != nil && configFromRegenerated.OSS != nil {
+					assert.Equal(t, config.OSS.AccessKey, configFromRegenerated.OSS.AccessKey)
+					assert.Equal(t, config.OSS.AssumeRoleARN, configFromRegenerated.OSS.AssumeRoleARN)
+				}
+			case storage.ProviderTypeLocalFS:
+				if config.LocalFS != nil && configFromRegenerated.LocalFS != nil {
+					assert.Equal(t, config.LocalFS.BasePath, configFromRegenerated.LocalFS.BasePath)
+					assert.Equal(t, config.LocalFS.CreateDirs, configFromRegenerated.LocalFS.CreateDirs)
+					assert.Equal(t, config.LocalFS.Permissions, configFromRegenerated.LocalFS.Permissions)
+				}
+			}
+		})
+	}
+}

@@ -501,3 +501,115 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 
 	return config, nil
 }
+
+// ToURI converts MeteringConfig to a URI string.
+// URI format: [scheme]://[bucket]/[prefix]?[parameters]
+// Examples:
+//   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
+//   - oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE
+//   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
+func (mc *MeteringConfig) ToURI() string {
+	var uri strings.Builder
+	var params url.Values = make(url.Values)
+
+	// Determine scheme based on provider type
+	switch mc.Type {
+	case storage.ProviderTypeS3:
+		uri.WriteString("s3://")
+	case storage.ProviderTypeOSS:
+		uri.WriteString("oss://")
+	case storage.ProviderTypeLocalFS:
+		uri.WriteString("localfs://")
+	default:
+		return ""
+	}
+
+	// Build host and path based on provider type
+	if mc.Type == storage.ProviderTypeLocalFS {
+		// For localfs, handle the base path properly
+		if mc.LocalFS != nil && mc.LocalFS.BasePath != "" {
+			// Remove any leading slash to avoid double slashes with scheme
+			basePath := strings.TrimPrefix(mc.LocalFS.BasePath, "/")
+			uri.WriteString("/")
+			uri.WriteString(basePath)
+		}
+	} else {
+		// For cloud providers, host is bucket name
+		if mc.Bucket != "" {
+			uri.WriteString(mc.Bucket)
+		}
+
+		// Path is the prefix
+		if mc.Prefix != "" {
+			uri.WriteString("/")
+			uri.WriteString(mc.Prefix)
+		}
+	}
+
+	// Add common parameters
+	if mc.Region != "" {
+		params.Set("region-id", mc.Region)
+	}
+	if mc.Endpoint != "" {
+		params.Set("endpoint", mc.Endpoint)
+	}
+	if mc.SharedPoolID != "" {
+		params.Set("shared-pool-id", mc.SharedPoolID)
+	}
+
+	// Add provider-specific parameters
+	switch mc.Type {
+	case storage.ProviderTypeS3:
+		if mc.AWS != nil {
+			if mc.AWS.AccessKey != "" {
+				params.Set("access-key", mc.AWS.AccessKey)
+			}
+			if mc.AWS.SecretAccessKey != "" {
+				params.Set("secret-access-key", mc.AWS.SecretAccessKey)
+			}
+			if mc.AWS.SessionToken != "" {
+				params.Set("session-token", mc.AWS.SessionToken)
+			}
+			if mc.AWS.AssumeRoleARN != "" {
+				params.Set("assume-role-arn", mc.AWS.AssumeRoleARN)
+			}
+			if mc.AWS.S3ForcePathStyle {
+				params.Set("s3-force-path-style", "true")
+			}
+		}
+
+	case storage.ProviderTypeOSS:
+		if mc.OSS != nil {
+			if mc.OSS.AccessKey != "" {
+				params.Set("access-key", mc.OSS.AccessKey)
+			}
+			if mc.OSS.SecretAccessKey != "" {
+				params.Set("secret-access-key", mc.OSS.SecretAccessKey)
+			}
+			if mc.OSS.SessionToken != "" {
+				params.Set("session-token", mc.OSS.SessionToken)
+			}
+			if mc.OSS.AssumeRoleARN != "" {
+				params.Set("assume-role-arn", mc.OSS.AssumeRoleARN)
+			}
+		}
+
+	case storage.ProviderTypeLocalFS:
+		if mc.LocalFS != nil {
+			if !mc.LocalFS.CreateDirs {
+				params.Set("create-dirs", "false")
+			}
+			if mc.LocalFS.Permissions != "" {
+				params.Set("permissions", mc.LocalFS.Permissions)
+			}
+		}
+	}
+
+	// Add query parameters if any exist
+	if len(params) > 0 {
+		uri.WriteString("?")
+		uri.WriteString(params.Encode())
+	}
+
+	return uri.String()
+}
