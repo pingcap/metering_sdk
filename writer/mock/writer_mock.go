@@ -20,6 +20,7 @@ import (
 type MockMeteringWriter struct {
 	ctrl     *gomock.Controller
 	recorder *MockMeteringWriterMockRecorder
+	isgomock struct{}
 }
 
 // MockMeteringWriterMockRecorder is the mock recorder for MockMeteringWriter.
@@ -39,11 +40,6 @@ func (m *MockMeteringWriter) EXPECT() *MockMeteringWriterMockRecorder {
 	return m.recorder
 }
 
-// ISGOMOCK indicates that this struct is a gomock mock.
-func (m *MockMeteringWriter) ISGOMOCK() struct{} {
-	return struct{}{}
-}
-
 // Close mocks base method.
 func (m *MockMeteringWriter) Close() error {
 	m.ctrl.T.Helper()
@@ -59,15 +55,15 @@ func (mr *MockMeteringWriterMockRecorder) Close() *gomock.Call {
 }
 
 // Write mocks base method.
-func (m *MockMeteringWriter) Write(arg0 context.Context, arg1 any) error {
+func (m *MockMeteringWriter) Write(ctx context.Context, data any) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Write", arg0, arg1)
+	ret := m.ctrl.Call(m, "Write", ctx, data)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Write indicates an expected call of Write.
-func (mr *MockMeteringWriterMockRecorder) Write(arg0, arg1 any) *gomock.Call {
+func (mr *MockMeteringWriterMockRecorder) Write(ctx, data any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Write", reflect.TypeOf((*MockMeteringWriter)(nil).Write), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Write", reflect.TypeOf((*MockMeteringWriter)(nil).Write), ctx, data)
 }

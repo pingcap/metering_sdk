@@ -95,9 +95,10 @@ ut:
 	@echo "check ut results in $(TEST_DIR)/unit-tests.xml"
 	@echo "check ut coverage by opening $(TEST_DIR)/cover.html using browser"
 
+# same version as TiDB
 .PHONY: mockgen
 mockgen:
-	GOBIN=$(shell pwd)/tools/bin go install github.com/lance6716/mock/mockgen@v0.4.0-patch
+	GOBIN=$(shell pwd)/tools/bin go install go.uber.org/mock/mockgen@v0.5.2
 
 .PHONY: gen_mock
 gen_mock: mockgen
