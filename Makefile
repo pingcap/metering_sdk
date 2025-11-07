@@ -94,3 +94,11 @@ ut:
 	go tool cover -html "$(TEST_DIR)/cover.out" -o "$(TEST_DIR)/cover.html"
 	@echo "check ut results in $(TEST_DIR)/unit-tests.xml"
 	@echo "check ut coverage by opening $(TEST_DIR)/cover.html using browser"
+
+.PHONY: mockgen
+mockgen:
+	GOBIN=$(shell pwd)/tools/bin go install github.com/lance6716/mock/mockgen@v0.4.0-patch
+
+.PHONY: gen_mock
+gen_mock: mockgen
+	tools/bin/mockgen -package metering github.com/pingcap/metering_sdk/writer MeteringWriter > writer/mock/writer_mock.go
