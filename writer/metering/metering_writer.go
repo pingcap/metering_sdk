@@ -42,6 +42,8 @@ type MeteringWriter struct {
 	sharedPoolID string     // shared pool cluster ID for path construction
 }
 
+var _ writer.MeteringWriter = (*MeteringWriter)(nil)
+
 // NewMeteringWriter creates a new metering data writer with default shared pool ID
 func NewMeteringWriter(provider storage.ObjectStorageProvider, cfg *config.Config) *MeteringWriter {
 	return NewMeteringWriterWithSharedPool(provider, cfg, DefaultSharedPoolID)

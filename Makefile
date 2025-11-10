@@ -94,3 +94,12 @@ ut:
 	go tool cover -html "$(TEST_DIR)/cover.out" -o "$(TEST_DIR)/cover.html"
 	@echo "check ut results in $(TEST_DIR)/unit-tests.xml"
 	@echo "check ut coverage by opening $(TEST_DIR)/cover.html using browser"
+
+# same version as TiDB
+.PHONY: mockgen
+mockgen:
+	GOBIN=$(shell pwd)/tools/bin go install go.uber.org/mock/mockgen@v0.5.2
+
+.PHONY: gen_mock
+gen_mock: mockgen
+	tools/bin/mockgen -package metering github.com/pingcap/metering_sdk/writer MeteringWriter > writer/mock/writer_mock.go

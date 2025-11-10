@@ -21,8 +21,8 @@ type MetaWriter interface {
 
 // MeteringWriter defines the metering writer interface
 type MeteringWriter interface {
-	// WriteMetering writes metering data
-	WriteMetering(ctx context.Context, data interface{}) error
+	// Write writes metering data
+	Write(ctx context.Context, data interface{}) error
 	// Close closes the writer and cleanup resources
 	Close() error
 }
