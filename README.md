@@ -480,19 +480,6 @@ func main() {
 - When `category` is empty: Only reads files from `/metering/meta/{type}/{cluster_id}/` (excludes category subdirectories)
 - Categories are strictly separated - empty category will not read categorized files and vice versa
 
-import (
-    "context"
-    "fmt"
-    "log"
-    "time"
-
-    "github.com/pingcap/metering_sdk/common"
-    "github.com/pingcap/metering_sdk/config"
-    "github.com/pingcap/metering_sdk/internal/cache"
-    metareader "github.com/pingcap/metering_sdk/reader/meta"
-    "github.com/pingcap/metering_sdk/storage"
-)
-
 func main() {
     // Create storage provider (same configuration as writer)
     s3Config := &storage.ProviderConfig{
