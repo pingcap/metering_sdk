@@ -147,6 +147,8 @@ writer := meteringwriter.NewMeteringWriterWithSharedPool(provider, cfg, "my-shar
 
 ### Writing Metadata
 
+#### Basic Metadata Writing
+
 ```go
 package main
 
@@ -222,9 +224,117 @@ func main() {
 }
 ```
 
+#### Writing Metadata with Category
+
+The SDK supports organizing metadata by category (e.g., by service type like TiDB, TiKV, PD). When a category is specified, the metadata is stored in a category-specific path.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/pingcap/metering_sdk/common"
+    "github.com/pingcap/metering_sdk/config"
+    "github.com/pingcap/metering_sdk/storage"
+    metawriter "github.com/pingcap/metering_sdk/writer/meta"
+)
+
+func main() {
+    // Create storage provider
+    s3Config := &storage.ProviderConfig{
+        Type:   storage.ProviderTypeS3,
+        Bucket: "my-bucket",
+        Region: "us-west-2",
+    }
+
+    provider, err := storage.NewObjectStorageProvider(s3Config)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    // Create meta writer
+    cfg := config.DefaultConfig()
+    writer := metawriter.NewMetaWriter(provider, cfg)
+    defer writer.Close()
+
+    ctx := context.Background()
+    now := time.Now().Unix()
+
+    // Write metadata with category for TiDB
+    tidbMetaData := &common.MetaData{
+        ClusterID: "cluster001",
+        Type:      common.MetaTypeLogic,
+        Category:  "tidb",  // Set category
+        ModifyTS:  now,
+        Metadata: map[string]interface{}{
+            "name":    "tidb-cluster",
+            "version": "7.5.0",
+            "nodes":   3,
+        },
+    }
+
+    if err := writer.Write(ctx, tidbMetaData); err != nil {
+        log.Fatalf("Failed to write TiDB meta data: %v", err)
+    }
+    fmt.Println("TiDB meta data written successfully!")
+
+    // Write metadata with category for TiKV
+    tikvMetaData := &common.MetaData{
+        ClusterID: "cluster001",
+        Type:      common.MetaTypeLogic,
+        Category:  "tikv",  // Different category
+        ModifyTS:  now,
+        Metadata: map[string]interface{}{
+            "name":    "tikv-cluster",
+            "version": "7.5.0",
+            "nodes":   5,
+        },
+    }
+
+    if err := writer.Write(ctx, tikvMetaData); err != nil {
+        log.Fatalf("Failed to write TiKV meta data: %v", err)
+    }
+    fmt.Println("TiKV meta data written successfully!")
+
+    // Write metadata without category (backward compatibility)
+    generalMetaData := &common.MetaData{
+        ClusterID: "cluster001",
+        Type:      common.MetaTypeLogic,
+        Category:  "",  // Empty category - uses traditional path
+        ModifyTS:  now,
+        Metadata: map[string]interface{}{
+            "name":    "general-cluster",
+            "version": "7.5.0",
+        },
+    }
+
+    if err := writer.Write(ctx, generalMetaData); err != nil {
+        log.Fatalf("Failed to write general meta data: %v", err)
+    }
+    fmt.Println("General meta data written successfully!")
+}
+```
+
+**Category Path Structure:**
+- With category: `/metering/meta/{type}/{category}/{cluster_id}/{modify_ts}.json.gz`
+- Without category: `/metering/meta/{type}/{cluster_id}/{modify_ts}.json.gz`
+
+Examples:
+```
+/metering/meta/logic/tidb/cluster001/1640995200.json.gz
+/metering/meta/logic/tikv/cluster001/1640995200.json.gz
+/metering/meta/logic/cluster001/1640995200.json.gz
+```
+
 ### Reading Metadata by Type
 
-The SDK now supports reading metadata by specific type (logic or sharedpool):
+The SDK supports reading metadata by specific type (logic or sharedpool) and by category:
+
+#### Reading Metadata without Category
 
 ```go
 package main
@@ -241,6 +351,134 @@ import (
     metareader "github.com/pingcap/metering_sdk/reader/meta"
     "github.com/pingcap/metering_sdk/storage"
 )
+
+func main() {
+    // Create storage provider (same configuration as writer)
+    s3Config := &storage.ProviderConfig{
+        Type:   storage.ProviderTypeS3,
+        Bucket: "your-bucket-name",
+        Region: "us-west-2",
+        Prefix: "metering-data",
+    }
+
+    provider, err := storage.NewObjectStorageProvider(s3Config)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    // Create meta reader with cache
+    cfg := config.DefaultConfig()
+    readerCfg := &metareader.Config{
+        Cache: &cache.Config{Type: cache.CacheTypeMemory, MaxSize: 100 * 1024 * 1024},
+    }
+    reader, err := metareader.NewMetaReader(provider, cfg, readerCfg)
+    if err != nil {
+        log.Fatalf("Failed to create meta reader: %v", err)
+    }
+    defer reader.Close()
+
+    ctx := context.Background()
+    timestamp := time.Now().Unix()
+
+    // Read logic cluster metadata
+    logicMeta, err := reader.ReadByType(ctx, "cluster001", common.MetaTypeLogic, timestamp)
+    if err != nil {
+        log.Printf("Failed to read logic meta data: %v", err)
+    } else {
+        fmt.Printf("Logic meta data: %+v\n", logicMeta)
+    }
+
+    // Read shared pool metadata
+    sharedpoolMeta, err := reader.ReadByType(ctx, "cluster001", common.MetaTypeSharedpool, timestamp)
+    if err != nil {
+        log.Printf("Failed to read sharedpool meta data: %v", err)
+    } else {
+        fmt.Printf("Sharedpool meta data: %+v\n", sharedpoolMeta)
+    }
+
+    // Read latest metadata (any type) - backward compatibility
+    latestMeta, err := reader.Read(ctx, "cluster001", timestamp)
+    if err != nil {
+        log.Printf("Failed to read meta data: %v", err)
+    } else {
+        fmt.Printf("Latest meta data: %+v\n", latestMeta)
+    }
+}
+```
+
+#### Reading Metadata with Category
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/pingcap/metering_sdk/common"
+    "github.com/pingcap/metering_sdk/config"
+    metareader "github.com/pingcap/metering_sdk/reader/meta"
+    "github.com/pingcap/metering_sdk/storage"
+)
+
+func main() {
+    // Create storage provider
+    s3Config := &storage.ProviderConfig{
+        Type:   storage.ProviderTypeS3,
+        Bucket: "my-bucket",
+        Region: "us-west-2",
+    }
+
+    provider, err := storage.NewObjectStorageProvider(s3Config)
+    if err != nil {
+        log.Fatalf("Failed to create storage provider: %v", err)
+    }
+
+    // Create meta reader
+    cfg := config.DefaultConfig()
+    reader, err := metareader.NewMetaReader(provider, cfg, nil)
+    if err != nil {
+        log.Fatalf("Failed to create meta reader: %v", err)
+    }
+    defer reader.Close()
+
+    ctx := context.Background()
+    timestamp := time.Now().Unix()
+
+    // Read TiDB metadata by category
+    tidbMeta, err := reader.ReadByTypeWithCategory(ctx, "cluster001", common.MetaTypeLogic, "tidb", timestamp)
+    if err != nil {
+        log.Printf("Failed to read TiDB meta data: %v", err)
+    } else {
+        fmt.Printf("TiDB metadata: %+v\n", tidbMeta)
+        fmt.Printf("Category: %s\n", tidbMeta.Category)
+    }
+
+    // Read TiKV metadata by category
+    tikvMeta, err := reader.ReadByTypeWithCategory(ctx, "cluster001", common.MetaTypeLogic, "tikv", timestamp)
+    if err != nil {
+        log.Printf("Failed to read TiKV meta data: %v", err)
+    } else {
+        fmt.Printf("TiKV metadata: %+v\n", tikvMeta)
+        fmt.Printf("Category: %s\n", tikvMeta.Category)
+    }
+
+    // Read metadata without category (traditional path)
+    generalMeta, err := reader.ReadByTypeWithCategory(ctx, "cluster001", common.MetaTypeLogic, "", timestamp)
+    if err != nil {
+        log.Printf("Failed to read general meta data: %v", err)
+    } else {
+        fmt.Printf("General metadata: %+v\n", generalMeta)
+    }
+}
+```
+
+**Category Reading Behavior:**
+- When `category` is specified: Only reads files from `/metering/meta/{type}/{category}/{cluster_id}/`
+- When `category` is empty: Only reads files from `/metering/meta/{type}/{cluster_id}/` (excludes category subdirectories)
+- Categories are strictly separated - empty category will not read categorized files and vice versa
 
 func main() {
     // Create storage provider (same configuration as writer)
@@ -1155,21 +1393,35 @@ SelfID:            "tidb-server-01"
 
 The SDK organizes files in the following structure:
 
+### Metering Data Files
 ```
 /metering/ru/{timestamp}/{category}/{shared_pool_id}/{self_id}-{part}.json.gz
+```
+
+### Metadata Files
+
+**With Category:**
+```
+/metering/meta/{type}/{category}/{cluster_id}/{modify_ts}.json.gz
+```
+
+**Without Category:**
+```
 /metering/meta/{type}/{cluster_id}/{modify_ts}.json.gz
 ```
 
 Where:
-- `{shared_pool_id}` - Mandatory shared pool identifier
+- `{shared_pool_id}` - Mandatory shared pool identifier for metering data
 - `{type}` can be:
   - `logic` - Logic cluster metadata
   - `sharedpool` - Shared pool metadata
+- `{category}` - Optional category identifier (e.g., "tidb", "tikv", "pd")
 
-Example:
+Examples:
 ```
 /metering/ru/1755850380/tidb-server/production-pool-001/tidbserver01-0.json.gz
 /metering/meta/logic/cluster001/1755850419.json.gz
+/metering/meta/logic/tidb/cluster001/1755850419.json.gz
 /metering/meta/sharedpool/cluster001/1755850419.json.gz
 ```
 

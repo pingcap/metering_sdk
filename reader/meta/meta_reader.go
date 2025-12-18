@@ -101,21 +101,34 @@ func NewMetaReader(provider storage.ObjectStorageProvider, cfg *config.Config, r
 
 // Read reads the latest metadata for the specified cluster at or before the specified timestamp
 func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64) (*common.MetaData, error) {
+	return r.ReadWithCategory(ctx, clusterID, "", timestamp)
+}
+
+// ReadWithCategory reads the latest metadata for the specified cluster and category at or before the specified timestamp
+func (r *MetaReader) ReadWithCategory(ctx context.Context, clusterID string, category string, timestamp int64) (*common.MetaData, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	r.logger.Debug("Reading latest meta data for cluster",
 		zap.String("cluster_id", clusterID),
+		zap.String("category", category),
 		zap.Int64("timestamp", timestamp),
 	)
 
 	// Use the incoming timestamp as cache key for exact lookup
-	cacheKey := fmt.Sprintf("meta:%s:%d", clusterID, timestamp)
+	var cacheKey string
+	if category != "" {
+		cacheKey = fmt.Sprintf("meta:%s:%s:%d", category, clusterID, timestamp)
+	} else {
+		cacheKey = fmt.Sprintf("meta:%s:%d", clusterID, timestamp)
+	}
+
 	if r.cache != nil {
 		if cached, found := r.cache.Get(cacheKey); found {
 			if metaData, ok := cached.(*common.MetaData); ok {
 				r.logger.Debug("Meta data cache hit",
 					zap.String("cluster_id", clusterID),
+					zap.String("category", category),
 					zap.Int64("timestamp", timestamp),
 					zap.Int64("actual_timestamp", metaData.ModifyTS),
 				)
@@ -125,7 +138,7 @@ func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64
 	}
 
 	// Cache miss, get from storage
-	metaData, err := r.readLatestFromStorage(ctx, clusterID, timestamp)
+	metaData, err := r.readLatestFromStorageWithCategory(ctx, clusterID, category, timestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +148,7 @@ func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64
 		if err := r.cache.Set(cacheKey, metaData); err != nil {
 			r.logger.Warn("Failed to cache meta data",
 				zap.String("cluster_id", clusterID),
+				zap.String("category", category),
 				zap.Int64("request_timestamp", timestamp),
 				zap.Int64("actual_timestamp", metaData.ModifyTS),
 				zap.Error(err),
@@ -142,6 +156,7 @@ func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64
 		} else {
 			r.logger.Debug("Meta data cached",
 				zap.String("cluster_id", clusterID),
+				zap.String("category", category),
 				zap.Int64("request_timestamp", timestamp),
 				zap.Int64("actual_timestamp", metaData.ModifyTS),
 			)
@@ -153,6 +168,11 @@ func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64
 
 // ReadByType reads the latest metadata for the specified cluster and type at or before the specified timestamp
 func (r *MetaReader) ReadByType(ctx context.Context, clusterID string, metaType common.MetaType, timestamp int64) (*common.MetaData, error) {
+	return r.ReadByTypeWithCategory(ctx, clusterID, metaType, "", timestamp)
+}
+
+// ReadByTypeWithCategory reads the latest metadata for the specified cluster, type, and category at or before the specified timestamp
+func (r *MetaReader) ReadByTypeWithCategory(ctx context.Context, clusterID string, metaType common.MetaType, category string, timestamp int64) (*common.MetaData, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -164,17 +184,25 @@ func (r *MetaReader) ReadByType(ctx context.Context, clusterID string, metaType 
 	r.logger.Debug("Reading latest meta data for cluster by type",
 		zap.String("cluster_id", clusterID),
 		zap.String("type", string(metaType)),
+		zap.String("category", category),
 		zap.Int64("timestamp", timestamp),
 	)
 
 	// Use type-specific cache key
-	cacheKey := fmt.Sprintf("meta:%s:%s:%d", string(metaType), clusterID, timestamp)
+	var cacheKey string
+	if category != "" {
+		cacheKey = fmt.Sprintf("meta:%s:%s:%s:%d", string(metaType), category, clusterID, timestamp)
+	} else {
+		cacheKey = fmt.Sprintf("meta:%s:%s:%d", string(metaType), clusterID, timestamp)
+	}
+
 	if r.cache != nil {
 		if cached, found := r.cache.Get(cacheKey); found {
 			if metaData, ok := cached.(*common.MetaData); ok {
 				r.logger.Debug("Meta data cache hit",
 					zap.String("cluster_id", clusterID),
 					zap.String("type", string(metaType)),
+					zap.String("category", category),
 					zap.Int64("timestamp", timestamp),
 					zap.Int64("actual_timestamp", metaData.ModifyTS),
 				)
@@ -184,7 +212,7 @@ func (r *MetaReader) ReadByType(ctx context.Context, clusterID string, metaType 
 	}
 
 	// Cache miss, get from storage
-	metaData, err := r.readLatestFromStorageByType(ctx, clusterID, metaType, timestamp)
+	metaData, err := r.readLatestFromStorageByTypeWithCategory(ctx, clusterID, metaType, category, timestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +223,7 @@ func (r *MetaReader) ReadByType(ctx context.Context, clusterID string, metaType 
 			r.logger.Warn("Failed to cache meta data",
 				zap.String("cluster_id", clusterID),
 				zap.String("type", string(metaType)),
+				zap.String("category", category),
 				zap.Int64("request_timestamp", timestamp),
 				zap.Int64("actual_timestamp", metaData.ModifyTS),
 				zap.Error(err),
@@ -203,6 +232,7 @@ func (r *MetaReader) ReadByType(ctx context.Context, clusterID string, metaType 
 			r.logger.Debug("Meta data cached",
 				zap.String("cluster_id", clusterID),
 				zap.String("type", string(metaType)),
+				zap.String("category", category),
 				zap.Int64("request_timestamp", timestamp),
 				zap.Int64("actual_timestamp", metaData.ModifyTS),
 			)
@@ -258,10 +288,16 @@ func (r *MetaReader) ReadFile(ctx context.Context, path string) (interface{}, er
 	return &metaData, nil
 }
 
-// readLatestFromStorage reads the latest metadata from storage
-func (r *MetaReader) readLatestFromStorage(ctx context.Context, clusterID string, timestamp int64) (*common.MetaData, error) {
-	// Build prefix path - use fixed meta path structure
-	prefix := fmt.Sprintf("metering/meta/%s/", clusterID)
+// readLatestFromStorageWithCategory reads the latest metadata from storage with optional category
+func (r *MetaReader) readLatestFromStorageWithCategory(ctx context.Context, clusterID string, category string, timestamp int64) (*common.MetaData, error) {
+	// Build prefix path based on whether category is set
+	// Note: This is for backward compatibility with files without type prefix
+	var prefix string
+	if category != "" {
+		prefix = fmt.Sprintf("metering/meta/%s/%s/", category, clusterID)
+	} else {
+		prefix = fmt.Sprintf("metering/meta/%s/", clusterID)
+	}
 
 	// List all files
 	files, err := r.provider.List(ctx, prefix)
@@ -270,6 +306,9 @@ func (r *MetaReader) readLatestFromStorage(ctx context.Context, clusterID string
 	}
 
 	if len(files) == 0 {
+		if category != "" {
+			return nil, fmt.Errorf("%w: no meta files found for cluster %s with category %s", reader.ErrFileNotFound, clusterID, category)
+		}
 		return nil, fmt.Errorf("%w: no meta files found for cluster %s", reader.ErrFileNotFound, clusterID)
 	}
 
@@ -296,6 +335,10 @@ func (r *MetaReader) readLatestFromStorage(ctx context.Context, clusterID string
 	}
 
 	if latestFile == "" {
+		if category != "" {
+			return nil, fmt.Errorf("%w: no meta files found for cluster %s with category %s before timestamp %d",
+				reader.ErrFileNotFound, clusterID, category, timestamp)
+		}
 		return nil, fmt.Errorf("%w: no meta files found for cluster %s before timestamp %d",
 			reader.ErrFileNotFound, clusterID, timestamp)
 	}
@@ -311,16 +354,22 @@ func (r *MetaReader) readLatestFromStorage(ctx context.Context, clusterID string
 	if !ok {
 		return nil, fmt.Errorf("invalid data type from file %s", latestFile)
 	}
-	//add more information
+	// Add more information
 	metaData.ClusterID = clusterID
+	metaData.Category = category
 	metaData.ModifyTS = latestTimestamp
 	return metaData, nil
 }
 
-// readLatestFromStorageByType reads the latest metadata from storage by type
-func (r *MetaReader) readLatestFromStorageByType(ctx context.Context, clusterID string, metaType common.MetaType, timestamp int64) (*common.MetaData, error) {
-	// Build prefix path with type: /metering/meta/{type}/{cluster_id}/
-	prefix := fmt.Sprintf("metering/meta/%s/%s/", string(metaType), clusterID)
+// readLatestFromStorageByTypeWithCategory reads the latest metadata from storage by type with optional category
+func (r *MetaReader) readLatestFromStorageByTypeWithCategory(ctx context.Context, clusterID string, metaType common.MetaType, category string, timestamp int64) (*common.MetaData, error) {
+	// Build prefix path with type and optional category
+	var prefix string
+	if category != "" {
+		prefix = fmt.Sprintf("metering/meta/%s/%s/%s/", string(metaType), category, clusterID)
+	} else {
+		prefix = fmt.Sprintf("metering/meta/%s/%s/", string(metaType), clusterID)
+	}
 
 	// List all files
 	files, err := r.provider.List(ctx, prefix)
@@ -329,7 +378,12 @@ func (r *MetaReader) readLatestFromStorageByType(ctx context.Context, clusterID 
 	}
 
 	if len(files) == 0 {
-		return nil, fmt.Errorf("%w: no meta files found for cluster %s with type %s", reader.ErrFileNotFound, clusterID, metaType)
+		if category != "" {
+			return nil, fmt.Errorf("%w: no meta files found for cluster %s with type %s and category %s",
+				reader.ErrFileNotFound, clusterID, metaType, category)
+		}
+		return nil, fmt.Errorf("%w: no meta files found for cluster %s with type %s",
+			reader.ErrFileNotFound, clusterID, metaType)
 	}
 
 	// Find the latest file with timestamp not greater than the specified time
@@ -355,6 +409,10 @@ func (r *MetaReader) readLatestFromStorageByType(ctx context.Context, clusterID 
 	}
 
 	if latestFile == "" {
+		if category != "" {
+			return nil, fmt.Errorf("%w: no meta files found for cluster %s with type %s and category %s before timestamp %d",
+				reader.ErrFileNotFound, clusterID, metaType, category, timestamp)
+		}
 		return nil, fmt.Errorf("%w: no meta files found for cluster %s with type %s before timestamp %d",
 			reader.ErrFileNotFound, clusterID, metaType, timestamp)
 	}
@@ -374,12 +432,13 @@ func (r *MetaReader) readLatestFromStorageByType(ctx context.Context, clusterID 
 	// Ensure the metadata has the correct information
 	metaData.ClusterID = clusterID
 	metaData.Type = metaType
+	metaData.Category = category
 	metaData.ModifyTS = latestTimestamp
 	return metaData, nil
 }
 
 // extractTimestampFromFilename extracts timestamp from filename
-// File path format: /metering/meta/{cluster_id}/{modify_ts}.json.gz
+// File path format: /metering/meta/{type}/{category}/{cluster_id}/{modify_ts}.json.gz
 func (r *MetaReader) extractTimestampFromFilename(filename string) (int64, error) {
 	// Get filename (excluding path)
 	baseName := filepath.Base(filename)

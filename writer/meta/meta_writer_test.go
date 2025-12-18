@@ -306,3 +306,103 @@ func TestMetaTypeValidation(t *testing.T) {
 		assert.Error(t, err, "Empty type should cause error")
 	})
 }
+
+// TestMetaWriterWithCategory tests metadata writing with category
+func TestMetaWriterWithCategory(t *testing.T) {
+	mockProvider := NewMockStorageProvider()
+	cfg := config.NewDebugConfig()
+	metaWriter := NewMetaWriter(mockProvider, cfg)
+	defer metaWriter.Close()
+
+	ctx := context.Background()
+
+	t.Run("write with category", func(t *testing.T) {
+		testData := &common.MetaData{
+			ClusterID: "cluster-123",
+			Type:      common.MetaTypeLogic,
+			Category:  "tidb",
+			ModifyTS:  time.Now().Unix(),
+			Metadata:  map[string]interface{}{"region": "us-west-2", "version": "v5.4.0"},
+		}
+
+		err := metaWriter.Write(ctx, testData)
+		assert.NoError(t, err, "Write with category failed")
+
+		// Verify path includes category
+		expectedPath := fmt.Sprintf("metering/meta/%s/%s/%s/%d.json.gz",
+			string(testData.Type),
+			testData.Category,
+			testData.ClusterID,
+			testData.ModifyTS,
+		)
+		uploadedData, exists := mockProvider.uploadedData[expectedPath]
+		assert.True(t, exists, "Expected data not found at path: %s", expectedPath)
+
+		// Verify correctness of compressed data
+		originalJSON, _ := json.Marshal(testData)
+		decompressAndVerify(t, uploadedData, originalJSON)
+	})
+
+	t.Run("write without category", func(t *testing.T) {
+		testData := &common.MetaData{
+			ClusterID: "cluster-456",
+			Type:      common.MetaTypeSharedpool,
+			Category:  "", // Empty category
+			ModifyTS:  time.Now().Unix() + 60,
+			Metadata:  map[string]interface{}{"region": "us-east-1", "version": "v6.0.0"},
+		}
+
+		err := metaWriter.Write(ctx, testData)
+		assert.NoError(t, err, "Write without category failed")
+
+		// Verify path does not include category
+		expectedPath := fmt.Sprintf("metering/meta/%s/%s/%d.json.gz",
+			string(testData.Type),
+			testData.ClusterID,
+			testData.ModifyTS,
+		)
+		uploadedData, exists := mockProvider.uploadedData[expectedPath]
+		assert.True(t, exists, "Expected data not found at path: %s", expectedPath)
+
+		// Verify correctness of compressed data
+		originalJSON, _ := json.Marshal(testData)
+		decompressAndVerify(t, uploadedData, originalJSON)
+	})
+
+	t.Run("multiple categories", func(t *testing.T) {
+		categories := []string{"tidb", "tikv", "tiflash"}
+		timestamp := time.Now().Unix()
+
+		for i, category := range categories {
+			testData := &common.MetaData{
+				ClusterID: "cluster-multi",
+				Type:      common.MetaTypeLogic,
+				Category:  category,
+				ModifyTS:  timestamp + int64(i),
+				Metadata:  map[string]interface{}{"category": category, "index": i},
+			}
+
+			err := metaWriter.Write(ctx, testData)
+			assert.NoError(t, err, "Write with category %s failed", category)
+
+			// Verify each category has its own path
+			expectedPath := fmt.Sprintf("metering/meta/%s/%s/%s/%d.json.gz",
+				string(testData.Type),
+				testData.Category,
+				testData.ClusterID,
+				testData.ModifyTS,
+			)
+			_, exists := mockProvider.uploadedData[expectedPath]
+			assert.True(t, exists, "Expected data not found at path: %s", expectedPath)
+		}
+
+		// Verify we have 3 separate files
+		count := 0
+		for path := range mockProvider.uploadedData {
+			if bytes.Contains([]byte(path), []byte("cluster-multi")) {
+				count++
+			}
+		}
+		assert.Equal(t, 3, count, "Expected 3 files for different categories")
+	})
+}
