@@ -55,17 +55,30 @@ func (w *MetaWriter) Write(ctx context.Context, data interface{}) error {
 		return fmt.Errorf("invalid metadata type: %s, must be one of: logic, sharedpool", metaData.Type)
 	}
 
-	// Build S3 path: /metering/meta/{type}/{cluster_id}/{modify_ts}.json.gz
-	path := fmt.Sprintf("metering/meta/%s/%s/%d.json.gz",
-		metaData.Type,
-		metaData.ClusterID,
-		metaData.ModifyTS,
-	)
+	// Build S3 path based on whether Category is set
+	var path string
+	if metaData.Category != "" {
+		// Path with category: /metering/meta/{type}/{category}/{cluster_id}/{modify_ts}.json.gz
+		path = fmt.Sprintf("metering/meta/%s/%s/%s/%d.json.gz",
+			metaData.Type,
+			metaData.Category,
+			metaData.ClusterID,
+			metaData.ModifyTS,
+		)
+	} else {
+		// Path without category: /metering/meta/{type}/{cluster_id}/{modify_ts}.json.gz
+		path = fmt.Sprintf("metering/meta/%s/%s/%d.json.gz",
+			metaData.Type,
+			metaData.ClusterID,
+			metaData.ModifyTS,
+		)
+	}
 
 	w.logger.Debug("Writing meta data",
 		zap.String("path", path),
 		zap.String("cluster_id", metaData.ClusterID),
 		zap.String("type", string(metaData.Type)),
+		zap.String("category", metaData.Category),
 		zap.Int64("modify_ts", metaData.ModifyTS),
 	)
 

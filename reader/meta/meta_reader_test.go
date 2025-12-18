@@ -641,3 +641,258 @@ func TestMetaReader_ReadByTypeWithCache(t *testing.T) {
 	assert.Equal(t, "cache-test-logic", result2.Metadata["name"].(string))
 	assert.Equal(t, result1.ModifyTS, result2.ModifyTS, "Cache should return same result")
 }
+
+// TestMetaReader_ReadWithCategory tests reading metadata with category
+func TestMetaReader_ReadWithCategory(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+
+	// Prepare test data with different categories
+	tidbData := &common.MetaData{
+		ClusterID: "test-cluster",
+		Category:  "tidb",
+		ModifyTS:  1000,
+		Metadata: map[string]interface{}{
+			"name":     "test-cluster-tidb",
+			"version":  "1.0.0",
+			"category": "tidb",
+		},
+	}
+
+	tikvData := &common.MetaData{
+		ClusterID: "test-cluster",
+		Category:  "tikv",
+		ModifyTS:  1000,
+		Metadata: map[string]interface{}{
+			"name":     "test-cluster-tikv",
+			"version":  "1.0.0",
+			"category": "tikv",
+		},
+	}
+
+	// Create compressed data
+	compressedTidbData, err := createCompressedTestData(tidbData)
+	assert.NoError(t, err, "Failed to create tidb test data")
+
+	compressedTikvData, err := createCompressedTestData(tikvData)
+	assert.NoError(t, err, "Failed to create tikv test data")
+
+	// Set file paths with category structure
+	provider.files["metering/meta/tidb/test-cluster/1000.json.gz"] = compressedTidbData
+	provider.files["metering/meta/tikv/test-cluster/1000.json.gz"] = compressedTikvData
+
+	cfg := &config.Config{
+		Logger: zap.NewNop(),
+	}
+
+	metaReader, err := NewMetaReader(provider, cfg, nil)
+	assert.NoError(t, err, "Failed to create MetaReader")
+
+	ctx := context.Background()
+
+	// Test reading tidb category
+	t.Run("read tidb category", func(t *testing.T) {
+		result, err := metaReader.ReadWithCategory(ctx, "test-cluster", "tidb", 1500)
+		assert.NoError(t, err, "ReadWithCategory tidb failed")
+		assert.Equal(t, "tidb", result.Category, "Expected tidb category")
+		assert.Equal(t, "test-cluster-tidb", result.Metadata["name"].(string))
+	})
+
+	// Test reading tikv category
+	t.Run("read tikv category", func(t *testing.T) {
+		result, err := metaReader.ReadWithCategory(ctx, "test-cluster", "tikv", 1500)
+		assert.NoError(t, err, "ReadWithCategory tikv failed")
+		assert.Equal(t, "tikv", result.Category, "Expected tikv category")
+		assert.Equal(t, "test-cluster-tikv", result.Metadata["name"].(string))
+	})
+
+	// Test reading without category (should ignore category-specific files)
+	t.Run("read without category", func(t *testing.T) {
+		_, err := metaReader.ReadWithCategory(ctx, "test-cluster", "", 1500)
+		assert.Error(t, err, "ReadWithCategory without category should fail when only category files exist")
+		assert.Contains(t, err.Error(), "file not found", "Error should mention file not found")
+	})
+
+	// Test reading non-existent category
+	t.Run("read non-existent category", func(t *testing.T) {
+		_, err := metaReader.ReadWithCategory(ctx, "test-cluster", "tiflash", 1500)
+		assert.Error(t, err, "ReadWithCategory with non-existent category should fail")
+		assert.Contains(t, err.Error(), "file not found", "Error should mention file not found")
+	})
+}
+
+// TestMetaReader_ReadByTypeWithCategory tests reading metadata by type with category
+func TestMetaReader_ReadByTypeWithCategory(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+
+	// Prepare test data with type and category
+	testData := &common.MetaData{
+		ClusterID: "test-cluster",
+		Type:      common.MetaTypeLogic,
+		Category:  "tidb",
+		ModifyTS:  2000,
+		Metadata: map[string]interface{}{
+			"name":     "test-cluster-logic-tidb",
+			"version":  "2.0.0",
+			"category": "tidb",
+		},
+	}
+
+	compressedData, err := createCompressedTestData(testData)
+	assert.NoError(t, err, "Failed to create test data")
+
+	// Set file path with type and category structure
+	provider.files["metering/meta/logic/tidb/test-cluster/2000.json.gz"] = compressedData
+
+	cfg := &config.Config{
+		Logger: zap.NewNop(),
+	}
+
+	metaReader, err := NewMetaReader(provider, cfg, nil)
+	assert.NoError(t, err, "Failed to create MetaReader")
+
+	ctx := context.Background()
+
+	// Test reading with type and category
+	t.Run("read with type and category", func(t *testing.T) {
+		result, err := metaReader.ReadByTypeWithCategory(ctx, "test-cluster", common.MetaTypeLogic, "tidb", 2500)
+		assert.NoError(t, err, "ReadByTypeWithCategory failed")
+		assert.Equal(t, common.MetaTypeLogic, result.Type, "Expected logic type")
+		assert.Equal(t, "tidb", result.Category, "Expected tidb category")
+		assert.Equal(t, "test-cluster-logic-tidb", result.Metadata["name"].(string))
+	})
+
+	// Test reading with type but wrong category
+	t.Run("read with wrong category", func(t *testing.T) {
+		_, err := metaReader.ReadByTypeWithCategory(ctx, "test-cluster", common.MetaTypeLogic, "tikv", 2500)
+		assert.Error(t, err, "ReadByTypeWithCategory with wrong category should fail")
+	})
+
+	// Test reading with type but no category (should ignore category-specific files)
+	t.Run("read with type but no category", func(t *testing.T) {
+		_, err := metaReader.ReadByTypeWithCategory(ctx, "test-cluster", common.MetaTypeLogic, "", 2500)
+		assert.Error(t, err, "ReadByTypeWithCategory without category should fail when only category files exist")
+		assert.Contains(t, err.Error(), "file not found", "Error should mention file not found")
+	})
+}
+
+// TestMetaReader_CategoryWithCache tests category support with caching
+func TestMetaReader_CategoryWithCache(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+
+	// Prepare test data
+	testData := &common.MetaData{
+		ClusterID: "cache-test-cluster",
+		Type:      common.MetaTypeLogic,
+		Category:  "tidb",
+		ModifyTS:  3000,
+		Metadata: map[string]interface{}{
+			"name":     "cache-test-logic-tidb",
+			"version":  "3.0.0",
+			"category": "tidb",
+		},
+	}
+
+	compressedData, err := createCompressedTestData(testData)
+	assert.NoError(t, err, "Failed to create test data")
+
+	provider.files["metering/meta/logic/tidb/cache-test-cluster/3000.json.gz"] = compressedData
+
+	// Create cache config
+	cacheConfig := &Config{
+		Cache: &CacheConfig{
+			Type:    CacheTypeMemory,
+			MaxSize: 100 * 1024 * 1024,
+		},
+	}
+
+	cfg := &config.Config{
+		Logger: zap.NewNop(),
+	}
+
+	metaReader, err := NewMetaReader(provider, cfg, cacheConfig)
+	assert.NoError(t, err, "Failed to create MetaReader")
+
+	ctx := context.Background()
+
+	// First read - should hit storage
+	result1, err := metaReader.ReadByTypeWithCategory(ctx, "cache-test-cluster", common.MetaTypeLogic, "tidb", 3500)
+	assert.NoError(t, err, "First read failed")
+	assert.Equal(t, "tidb", result1.Category)
+	assert.Equal(t, "cache-test-logic-tidb", result1.Metadata["name"].(string))
+
+	// Second read with same parameters - should hit cache
+	result2, err := metaReader.ReadByTypeWithCategory(ctx, "cache-test-cluster", common.MetaTypeLogic, "tidb", 3500)
+	assert.NoError(t, err, "Second read failed")
+	assert.Equal(t, "tidb", result2.Category)
+	assert.Equal(t, result1.ModifyTS, result2.ModifyTS, "Cache should return same result")
+
+	// Verify cache contains the correct key
+	cacheKey := "meta:logic:tidb:cache-test-cluster:3500"
+	cached, found := metaReader.cache.Get(cacheKey)
+	assert.True(t, found, "Cache should contain the key")
+	assert.NotNil(t, cached, "Cached value should not be nil")
+}
+
+// TestMetaReader_MixedCategoryAndNonCategory tests reading mix of files with and without category
+func TestMetaReader_MixedCategoryAndNonCategory(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+
+	// Data without category
+	dataNoCategory := &common.MetaData{
+		ClusterID: "test-cluster",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  1000,
+		Metadata: map[string]interface{}{
+			"name":    "test-cluster-no-category",
+			"version": "1.0.0",
+		},
+	}
+
+	// Data with category
+	dataWithCategory := &common.MetaData{
+		ClusterID: "test-cluster",
+		Type:      common.MetaTypeLogic,
+		Category:  "tidb",
+		ModifyTS:  2000,
+		Metadata: map[string]interface{}{
+			"name":     "test-cluster-with-category",
+			"version":  "2.0.0",
+			"category": "tidb",
+		},
+	}
+
+	compressedNoCategory, err := createCompressedTestData(dataNoCategory)
+	assert.NoError(t, err, "Failed to create no-category test data")
+
+	compressedWithCategory, err := createCompressedTestData(dataWithCategory)
+	assert.NoError(t, err, "Failed to create with-category test data")
+
+	// Set file paths
+	provider.files["metering/meta/logic/test-cluster/1000.json.gz"] = compressedNoCategory
+	provider.files["metering/meta/logic/tidb/test-cluster/2000.json.gz"] = compressedWithCategory
+
+	cfg := &config.Config{
+		Logger: zap.NewNop(),
+	}
+
+	metaReader, err := NewMetaReader(provider, cfg, nil)
+	assert.NoError(t, err, "Failed to create MetaReader")
+
+	ctx := context.Background()
+
+	// Read without specifying category - should get file without category
+	t.Run("read without category specified", func(t *testing.T) {
+		result, err := metaReader.ReadByType(ctx, "test-cluster", common.MetaTypeLogic, 1500)
+		assert.NoError(t, err, "Read without category failed")
+		assert.Equal(t, "", result.Category, "Expected no category")
+		assert.Equal(t, "test-cluster-no-category", result.Metadata["name"].(string))
+	})
+
+	// Read with category specified - should get file with category
+	t.Run("read with category specified", func(t *testing.T) {
+		result, err := metaReader.ReadByTypeWithCategory(ctx, "test-cluster", common.MetaTypeLogic, "tidb", 2500)
+		assert.NoError(t, err, "Read with category failed")
+		assert.Equal(t, "tidb", result.Category, "Expected tidb category")
+		assert.Equal(t, "test-cluster-with-category", result.Metadata["name"].(string))
+	})
+}

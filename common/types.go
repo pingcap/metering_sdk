@@ -33,8 +33,9 @@ type MeteringData struct {
 
 // MetaData metadata structure
 type MetaData struct {
-	ClusterID string                 `json:"cluster_id"` // cluster ID
-	Type      MetaType               `json:"type"`       // metadata type (logic or sharedpool)
-	ModifyTS  int64                  `json:"modify_ts"`  // modification timestamp
-	Metadata  map[string]interface{} `json:"metadata"`   // metadata content
+	ClusterID string                 `json:"cluster_id"`         // cluster ID
+	Type      MetaType               `json:"type"`               // metadata type (logic or sharedpool)
+	Category  string                 `json:"category,omitempty"` // service category (optional)
+	ModifyTS  int64                  `json:"modify_ts"`          // modification timestamp
+	Metadata  map[string]interface{} `json:"metadata"`           // metadata content
 }
