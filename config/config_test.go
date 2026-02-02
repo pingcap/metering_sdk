@@ -162,6 +162,26 @@ func TestMeteringConfig_ToProviderConfig(t *testing.T) {
 				assert.True(t, cfg.LocalFS.CreateDirs)
 			},
 		},
+		{
+			name: "Azure configuration",
+			meteringConfig: NewMeteringConfig().
+				WithAzure("test-account", "test-container").
+				WithAzureConfig(&MeteringAzureConfig{
+					AccountName: "test-account",
+					AccountKey:  "test-key",
+					SASToken:    "test-sas",
+				}).
+				WithPrefix("test-prefix"),
+			expectedType: storage.ProviderTypeAzure,
+			validateFunc: func(t *testing.T, cfg *storage.ProviderConfig) {
+				assert.Equal(t, "test-container", cfg.Bucket)
+				assert.Equal(t, "test-prefix", cfg.Prefix)
+				assert.NotNil(t, cfg.Azure)
+				assert.Equal(t, "test-account", cfg.Azure.AccountName)
+				assert.Equal(t, "test-key", cfg.Azure.AccountKey)
+				assert.Equal(t, "test-sas", cfg.Azure.SASToken)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -456,6 +476,20 @@ func TestNewFromURI(t *testing.T) {
 			},
 		},
 		{
+			name: "Azure URI with basic configuration",
+			uri:  "azure://my-container/prefix?account-name=testacct&account-key=testkey&endpoint=https://testacct.blob.core.windows.net",
+			expected: &MeteringConfig{
+				Type:     storage.ProviderTypeAzure,
+				Bucket:   "my-container",
+				Prefix:   "prefix",
+				Endpoint: "https://testacct.blob.core.windows.net",
+				Azure: &MeteringAzureConfig{
+					AccountName: "testacct",
+					AccountKey:  "testkey",
+				},
+			},
+		},
+		{
 			name: "LocalFS URI with host and path",
 			uri:  "localfs:///data/storage/logs?create-dirs=false&permissions=0644",
 			expected: &MeteringConfig{
@@ -596,6 +630,15 @@ func TestNewFromURI(t *testing.T) {
 				assert.Equal(t, tt.expected.OSS.SessionToken, config.OSS.SessionToken)
 			} else {
 				assert.Nil(t, config.OSS)
+			}
+
+			if tt.expected.Azure != nil {
+				assert.NotNil(t, config.Azure)
+				assert.Equal(t, tt.expected.Azure.AccountName, config.Azure.AccountName)
+				assert.Equal(t, tt.expected.Azure.AccountKey, config.Azure.AccountKey)
+				assert.Equal(t, tt.expected.Azure.SASToken, config.Azure.SASToken)
+			} else {
+				assert.Nil(t, config.Azure)
 			}
 
 			if tt.expected.LocalFS != nil {
@@ -878,6 +921,20 @@ func TestToURI(t *testing.T) {
 			want: "oss://test-oss/metrics?access-key=ExampleAccessKey&assume-role-arn=acs%3Aram%3A%3A123456789012%3Arole%2FOSSAccess&region-id=oss-cn-hangzhou&secret-access-key=ExampleSecretAccessKey",
 		},
 		{
+			name: "Azure basic",
+			config: &MeteringConfig{
+				Type:     storage.ProviderTypeAzure,
+				Bucket:   "my-container",
+				Prefix:   "data",
+				Endpoint: "https://example.blob.core.windows.net",
+				Azure: &MeteringAzureConfig{
+					AccountName: "example",
+					AccountKey:  "example-key",
+				},
+			},
+			want: "azure://my-container/data?account-key=example-key&account-name=example&endpoint=https%3A%2F%2Fexample.blob.core.windows.net",
+		},
+		{
 			name: "LocalFS basic",
 			config: &MeteringConfig{
 				Type: storage.ProviderTypeLocalFS,
@@ -929,6 +986,7 @@ func TestToURI_RoundTrip(t *testing.T) {
 	testURIs := []string{
 		"s3://my-bucket/data?region-id=us-east-1",
 		"oss://oss-bucket/logs?region-id=oss-ap-southeast-1&access-key=test",
+		"azure://my-container/data?account-name=acct&account-key=key&endpoint=https%3A%2F%2Facct.blob.core.windows.net",
 		"localfs:///data/storage?create-dirs=false&permissions=0755",
 		"s3://test?region-id=us-west-2&endpoint=https%3A%2F%2Fs3.example.com&shared-pool-id=pool123",
 	}
@@ -966,6 +1024,12 @@ func TestToURI_RoundTrip(t *testing.T) {
 				if config.OSS != nil && configFromRegenerated.OSS != nil {
 					assert.Equal(t, config.OSS.AccessKey, configFromRegenerated.OSS.AccessKey)
 					assert.Equal(t, config.OSS.AssumeRoleARN, configFromRegenerated.OSS.AssumeRoleARN)
+				}
+			case storage.ProviderTypeAzure:
+				if config.Azure != nil && configFromRegenerated.Azure != nil {
+					assert.Equal(t, config.Azure.AccountName, configFromRegenerated.Azure.AccountName)
+					assert.Equal(t, config.Azure.AccountKey, configFromRegenerated.Azure.AccountKey)
+					assert.Equal(t, config.Azure.SASToken, configFromRegenerated.Azure.SASToken)
 				}
 			case storage.ProviderTypeLocalFS:
 				if config.LocalFS != nil && configFromRegenerated.LocalFS != nil {

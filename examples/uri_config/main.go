@@ -94,7 +94,23 @@ func main() {
 	fmt.Println()
 
 	// Example 6: LocalFS URI (unchanged format)
-	fmt.Println("6. LocalFS Configuration")
+	fmt.Println("6. Azure Blob Storage Configuration")
+	azureURI := "azure://my-container/prefix?account-name=myaccount&account-key=ExampleAccountKey&endpoint=https://myaccount.blob.core.windows.net"
+	azureConfig, err := config.NewFromURI(azureURI)
+	if err != nil {
+		log.Fatalf("Failed to parse Azure URI: %v", err)
+	}
+	fmt.Printf("   URI: %s\n", azureURI)
+	fmt.Printf("   Config: Type=%s, Bucket=%s, Prefix=%s, Endpoint=%s\n",
+		azureConfig.Type, azureConfig.Bucket, azureConfig.Prefix, azureConfig.Endpoint)
+	if azureConfig.Azure != nil {
+		fmt.Printf("   Azure Config: AccountName=%s, AccountKey=%s\n",
+			azureConfig.Azure.AccountName, azureConfig.Azure.AccountKey)
+	}
+	fmt.Println()
+
+	// Example 7: LocalFS URI (unchanged format)
+	fmt.Println("7. LocalFS Configuration")
 	localURI := "localfs:///tmp/metering-demo/logs?create-dirs=true&permissions=0755"
 	localConfig, err := config.NewFromURI(localURI)
 	if err != nil {
@@ -120,11 +136,13 @@ func main() {
 	fmt.Println("=== URI Format Summary ===")
 	fmt.Println("S3:      s3://[bucket]/[prefix]?region-id=[region]&endpoint=[endpoint]&...")
 	fmt.Println("OSS:     oss://[bucket]/[prefix]?region-id=[region]&...")
+	fmt.Println("Azure:   azure://[container]/[prefix]?account-name=[name]&account-key=[key]&endpoint=[endpoint]")
 	fmt.Println("LocalFS: localfs:///[path]?create-dirs=[true|false]&permissions=[mode]")
 	fmt.Println()
 	fmt.Println("Supported parameters:")
 	fmt.Println("- region-id: Region identifier for cloud providers")
 	fmt.Println("- endpoint: Custom endpoint URL for S3-compatible services")
+	fmt.Println("- account-name, account-key, sas-token: Azure Blob credentials")
 	fmt.Println("- access-key, secret-access-key, session-token: Credentials")
 	fmt.Println("- assume-role-arn / role-arn: Role ARN for assume role authentication")
 	fmt.Println("- shared-pool-id: Shared pool cluster ID")
