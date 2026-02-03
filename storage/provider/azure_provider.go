@@ -121,14 +121,20 @@ func (a *AzureProvider) buildPath(path string) string {
 // Upload implements ObjectStorageProvider interface
 func (a *AzureProvider) Upload(ctx context.Context, path string, data io.Reader) error {
 	fullPath := a.buildPath(path)
-	_, err := a.client.UploadStream(ctx, a.container, fullPath, data, nil)
+	_, err := a.client.ServiceClient().
+		NewContainerClient(a.container).
+		NewBlockBlobClient(fullPath).
+		UploadStream(ctx, data, nil)
 	return err
 }
 
 // Download implements ObjectStorageProvider interface
 func (a *AzureProvider) Download(ctx context.Context, path string) (io.ReadCloser, error) {
 	fullPath := a.buildPath(path)
-	result, err := a.client.DownloadStream(ctx, a.container, fullPath, nil)
+	result, err := a.client.ServiceClient().
+		NewContainerClient(a.container).
+		NewBlobClient(fullPath).
+		DownloadStream(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +144,10 @@ func (a *AzureProvider) Download(ctx context.Context, path string) (io.ReadClose
 // Delete implements ObjectStorageProvider interface
 func (a *AzureProvider) Delete(ctx context.Context, path string) error {
 	fullPath := a.buildPath(path)
-	_, err := a.client.DeleteBlob(ctx, a.container, fullPath, nil)
+	_, err := a.client.ServiceClient().
+		NewContainerClient(a.container).
+		NewBlobClient(fullPath).
+		Delete(ctx, nil)
 	if err != nil && !isAzureNotFound(err) {
 		return err
 	}
@@ -148,21 +157,15 @@ func (a *AzureProvider) Delete(ctx context.Context, path string) error {
 // Exists implements ObjectStorageProvider interface
 func (a *AzureProvider) Exists(ctx context.Context, path string) (bool, error) {
 	fullPath := a.buildPath(path)
-	options := &azblob.DownloadStreamOptions{
-		Range: azblob.HTTPRange{
-			Offset: 0,
-			Count:  1,
-		},
-	}
-	result, err := a.client.DownloadStream(ctx, a.container, fullPath, options)
+	_, err := a.client.ServiceClient().
+		NewContainerClient(a.container).
+		NewBlobClient(fullPath).
+		GetProperties(ctx, nil)
 	if err != nil {
 		if isAzureNotFound(err) {
 			return false, nil
 		}
 		return false, err
-	}
-	if result.Body != nil {
-		_ = result.Body.Close()
 	}
 	return true, nil
 }
@@ -170,9 +173,9 @@ func (a *AzureProvider) Exists(ctx context.Context, path string) (bool, error) {
 // List implements ObjectStorageProvider interface
 func (a *AzureProvider) List(ctx context.Context, prefix string) ([]string, error) {
 	fullPrefix := a.buildPath(prefix)
-	pager := a.client.NewListBlobsFlatPager(a.container, &azblob.ListBlobsFlatOptions{
-		Prefix: &fullPrefix,
-	})
+	pager := a.client.ServiceClient().
+		NewContainerClient(a.container).
+		NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{Prefix: &fullPrefix})
 	var objects []string
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
