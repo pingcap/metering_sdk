@@ -104,8 +104,12 @@ func main() {
 	fmt.Printf("   Config: Type=%s, Bucket=%s, Prefix=%s, Endpoint=%s\n",
 		azureConfig.Type, azureConfig.Bucket, azureConfig.Prefix, azureConfig.Endpoint)
 	if azureConfig.Azure != nil {
+		maskedAccountKey := "***REDACTED***"
+		if azureConfig.Azure.AccountKey == "" {
+			maskedAccountKey = "<empty>"
+		}
 		fmt.Printf("   Azure Config: AccountName=%s, AccountKey=%s\n",
-			azureConfig.Azure.AccountName, azureConfig.Azure.AccountKey)
+			azureConfig.Azure.AccountName, maskedAccountKey)
 	}
 	fmt.Println()
 
