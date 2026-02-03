@@ -93,7 +93,7 @@ func main() {
 	}
 	fmt.Println()
 
-	// Example 6: LocalFS URI (unchanged format)
+	// Example 6: Azure Blob Storage URI
 	fmt.Println("6. Azure Blob Storage Configuration")
 	azureURI := "azure://my-container/prefix?account-name=myaccount&account-key=ExampleAccountKey&endpoint=https://myaccount.blob.core.windows.net"
 	azureConfig, err := config.NewFromURI(azureURI)
