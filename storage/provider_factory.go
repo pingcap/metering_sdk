@@ -19,7 +19,7 @@ func NewObjectStorageProvider(config *ProviderConfig) (ObjectStorageProvider, er
 	case provider.ProviderTypeGCS:
 		return nil, fmt.Errorf("provider GCS  not implemented yet")
 	case provider.ProviderTypeAzure:
-		return nil, fmt.Errorf("provider Azure  not implemented yet")
+		return provider.NewAzureProvider(config)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", config.Type)
 	}

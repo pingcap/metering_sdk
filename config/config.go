@@ -138,6 +138,13 @@ type MeteringOSSConfig struct {
 	SessionToken    string `yaml:"session-token,omitempty" toml:"session-token,omitempty" json:"session-token,omitempty" reloadable:"false"`
 }
 
+// MeteringAzureConfig Azure Blob Storage specific configuration for high-level config
+type MeteringAzureConfig struct {
+	AccountName string `yaml:"account-name,omitempty" toml:"account-name,omitempty" json:"account-name,omitempty" reloadable:"false"`
+	AccountKey  string `yaml:"account-key,omitempty" toml:"account-key,omitempty" json:"account-key,omitempty" reloadable:"false"`
+	SASToken    string `yaml:"sas-token,omitempty" toml:"sas-token,omitempty" json:"sas-token,omitempty" reloadable:"false"`
+}
+
 // MeteringLocalFSConfig local filesystem specific configuration for high-level config
 type MeteringLocalFSConfig struct {
 	BasePath    string `yaml:"base-path,omitempty" toml:"base-path,omitempty" json:"base-path,omitempty" reloadable:"false"`
@@ -162,6 +169,7 @@ type MeteringConfig struct {
 	// Cloud-specific configurations
 	AWS     *MeteringAWSConfig     `yaml:"aws,omitempty" toml:"aws,omitempty" json:"aws,omitempty" reloadable:"false"`
 	OSS     *MeteringOSSConfig     `yaml:"oss,omitempty" toml:"oss,omitempty" json:"oss,omitempty" reloadable:"false"`
+	Azure   *MeteringAzureConfig   `yaml:"azure,omitempty" toml:"azure,omitempty" json:"azure,omitempty" reloadable:"false"`
 	LocalFS *MeteringLocalFSConfig `yaml:"localfs,omitempty" toml:"localfs,omitempty" json:"localfs,omitempty" reloadable:"false"`
 
 	// Business-specific configurations
@@ -197,6 +205,14 @@ func (mc *MeteringConfig) ToProviderConfig() *storage.ProviderConfig {
 				AccessKey:       mc.OSS.AccessKey,
 				SecretAccessKey: mc.OSS.SecretAccessKey,
 				SessionToken:    mc.OSS.SessionToken,
+			}
+		}
+	case storage.ProviderTypeAzure:
+		if mc.Azure != nil {
+			config.Azure = &storage.AzureConfig{
+				AccountName: mc.Azure.AccountName,
+				AccountKey:  mc.Azure.AccountKey,
+				SASToken:    mc.Azure.SASToken,
 			}
 		}
 	case storage.ProviderTypeLocalFS:
@@ -257,6 +273,31 @@ func (mc *MeteringConfig) WithOSSAssumeRole(region, bucket, roleARN string) *Met
 	return mc
 }
 
+// WithAzure configures for Azure Blob Storage
+func (mc *MeteringConfig) WithAzure(accountName, container string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeAzure
+	mc.Bucket = container
+	if mc.Azure == nil {
+		mc.Azure = &MeteringAzureConfig{}
+	}
+	mc.Azure.AccountName = accountName
+	return mc
+}
+
+// WithAzureAccountKey configures for Azure Blob Storage with account key
+func (mc *MeteringConfig) WithAzureAccountKey(accountName, container, accountKey string) *MeteringConfig {
+	mc.WithAzure(accountName, container)
+	mc.Azure.AccountKey = accountKey
+	return mc
+}
+
+// WithAzureSASToken configures for Azure Blob Storage with SAS token
+func (mc *MeteringConfig) WithAzureSASToken(accountName, container, sasToken string) *MeteringConfig {
+	mc.WithAzure(accountName, container)
+	mc.Azure.SASToken = sasToken
+	return mc
+}
+
 // WithLocalFS configures for local filesystem storage
 func (mc *MeteringConfig) WithLocalFS(basePath string) *MeteringConfig {
 	mc.Type = storage.ProviderTypeLocalFS
@@ -277,6 +318,12 @@ func (mc *MeteringConfig) WithAWSConfig(awsConfig *MeteringAWSConfig) *MeteringC
 // WithOSSConfig sets OSS specific configuration
 func (mc *MeteringConfig) WithOSSConfig(ossConfig *MeteringOSSConfig) *MeteringConfig {
 	mc.OSS = ossConfig
+	return mc
+}
+
+// WithAzureConfig sets Azure specific configuration
+func (mc *MeteringConfig) WithAzureConfig(azureConfig *MeteringAzureConfig) *MeteringConfig {
+	mc.Azure = azureConfig
 	return mc
 }
 
@@ -332,12 +379,14 @@ func (mc *MeteringConfig) WithOSSRoleARN(roleARN string) *MeteringConfig {
 // Examples:
 //   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
 //   - oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE
+//   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
 //
-// Supported schemes: s3, oss, localfs, file
+// Supported schemes: s3, oss, azure (alias: azblob), localfs, file
 // Common parameters: region-id/region, endpoint, shared-pool-id
 // AWS/S3 parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn, s3-force-path-style/force-path-style
 // OSS parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn
+// Azure parameters: account-name, account-key, sas-token
 // LocalFS parameters: create-dirs, permissions
 func NewFromURI(uriStr string) (*MeteringConfig, error) {
 	parsedURL, err := url.Parse(uriStr)
@@ -353,6 +402,8 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 		config.Type = storage.ProviderTypeS3
 	case "oss":
 		config.Type = storage.ProviderTypeOSS
+	case "azure", "azblob":
+		config.Type = storage.ProviderTypeAzure
 	case "localfs", "file":
 		config.Type = storage.ProviderTypeLocalFS
 	default:
@@ -486,6 +537,27 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 			config.OSS = ossConfig
 		}
 
+	case storage.ProviderTypeAzure:
+		azureConfig := &MeteringAzureConfig{}
+		hasAzureConfig := false
+
+		if accountName := queryParams.Get("account-name"); accountName != "" {
+			azureConfig.AccountName = accountName
+			hasAzureConfig = true
+		}
+		if accountKey := queryParams.Get("account-key"); accountKey != "" {
+			azureConfig.AccountKey = accountKey
+			hasAzureConfig = true
+		}
+		if sasToken := queryParams.Get("sas-token"); sasToken != "" {
+			azureConfig.SASToken = sasToken
+			hasAzureConfig = true
+		}
+
+		if hasAzureConfig {
+			config.Azure = azureConfig
+		}
+
 	case storage.ProviderTypeLocalFS:
 		if config.LocalFS == nil {
 			config.LocalFS = &MeteringLocalFSConfig{CreateDirs: true}
@@ -507,6 +579,7 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 // Examples:
 //   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
 //   - oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE
+//   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
 func (mc *MeteringConfig) ToURI() string {
 	var uri strings.Builder
@@ -518,6 +591,8 @@ func (mc *MeteringConfig) ToURI() string {
 		uri.WriteString("s3://")
 	case storage.ProviderTypeOSS:
 		uri.WriteString("oss://")
+	case storage.ProviderTypeAzure:
+		uri.WriteString("azure://")
 	case storage.ProviderTypeLocalFS:
 		uri.WriteString("localfs://")
 	default:
@@ -591,6 +666,19 @@ func (mc *MeteringConfig) ToURI() string {
 			}
 			if mc.OSS.AssumeRoleARN != "" {
 				params.Set("assume-role-arn", mc.OSS.AssumeRoleARN)
+			}
+		}
+
+	case storage.ProviderTypeAzure:
+		if mc.Azure != nil {
+			if mc.Azure.AccountName != "" {
+				params.Set("account-name", mc.Azure.AccountName)
+			}
+			if mc.Azure.AccountKey != "" {
+				params.Set("account-key", mc.Azure.AccountKey)
+			}
+			if mc.Azure.SASToken != "" {
+				params.Set("sas-token", mc.Azure.SASToken)
 			}
 		}
 

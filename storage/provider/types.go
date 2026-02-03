@@ -52,6 +52,8 @@ type GCSConfig struct {
 // AzureConfig Azure Blob Storage specific configuration
 type AzureConfig struct {
 	AccountName string `json:"account_name,omitempty"`
+	AccountKey  string `json:"account_key,omitempty"`
+	SASToken    string `json:"sas_token,omitempty"`
 }
 
 // OSSConfig Alibaba Cloud OSS specific configuration
