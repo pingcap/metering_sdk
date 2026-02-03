@@ -382,7 +382,7 @@ func (mc *MeteringConfig) WithOSSRoleARN(roleARN string) *MeteringConfig {
 //   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
 //
-// Supported schemes: s3, oss, azure, localfs, file
+// Supported schemes: s3, oss, azure (alias: azblob), localfs, file
 // Common parameters: region-id/region, endpoint, shared-pool-id
 // AWS/S3 parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn, s3-force-path-style/force-path-style
 // OSS parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn
