@@ -490,6 +490,20 @@ func TestNewFromURI(t *testing.T) {
 			},
 		},
 		{
+			name: "Azure URI alias protocol azblob",
+			uri:  "azblob://my-container/prefix?account-name=testacct&account-key=testkey&endpoint=https://testacct.blob.core.windows.net",
+			expected: &MeteringConfig{
+				Type:     storage.ProviderTypeAzure,
+				Bucket:   "my-container",
+				Prefix:   "prefix",
+				Endpoint: "https://testacct.blob.core.windows.net",
+				Azure: &MeteringAzureConfig{
+					AccountName: "testacct",
+					AccountKey:  "testkey",
+				},
+			},
+		},
+		{
 			name: "LocalFS URI with host and path",
 			uri:  "localfs:///data/storage/logs?create-dirs=false&permissions=0644",
 			expected: &MeteringConfig{
