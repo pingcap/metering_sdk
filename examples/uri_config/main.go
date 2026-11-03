@@ -54,13 +54,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse S3 credentials URI: %v", err)
 	}
-	fmt.Printf("   URI: %s\n", s3CredsURI)
+	fmt.Printf("   URI (credentials omitted): %s\n", s3CredsConfig.ToURI())
 	fmt.Printf("   Config: Type=%s, Region=%s, Bucket=%s, Prefix=%s, Endpoint=%s\n",
 		s3CredsConfig.Type, s3CredsConfig.Region, s3CredsConfig.Bucket,
 		s3CredsConfig.Prefix, s3CredsConfig.Endpoint)
 	if s3CredsConfig.AWS != nil {
-		fmt.Printf("   AWS Credentials: AccessKey=%s, SecretKey=%s\n",
-			s3CredsConfig.AWS.AccessKey, s3CredsConfig.AWS.SecretAccessKey)
+		credentials := s3CredsConfig.AWS.Redacted()
+		fmt.Printf("   AWS Credentials: AccessKey=%s, SecretKey=%s, SessionToken=%s\n",
+			credentials.AccessKey, credentials.SecretAccessKey, credentials.SessionToken)
 	}
 	fmt.Println()
 
@@ -83,13 +84,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse OSS role URI: %v", err)
 	}
-	fmt.Printf("   URI: %s\n", ossRoleURI)
+	fmt.Printf("   URI (credentials omitted): %s\n", ossRoleConfig.ToURI())
 	fmt.Printf("   Config: Type=%s, Region=%s, Bucket=%s, Prefix=%s\n",
 		ossRoleConfig.Type, ossRoleConfig.Region, ossRoleConfig.Bucket, ossRoleConfig.Prefix)
 	if ossRoleConfig.OSS != nil {
-		fmt.Printf("   OSS Role ARN: %s\n", ossRoleConfig.OSS.AssumeRoleARN)
-		fmt.Printf("   OSS Credentials: AccessKey=%s, SecretKey=%s\n",
-			ossRoleConfig.OSS.AccessKey, ossRoleConfig.OSS.SecretAccessKey)
+		credentials := ossRoleConfig.OSS.Redacted()
+		fmt.Printf("   OSS Role ARN: %s\n", credentials.AssumeRoleARN)
+		fmt.Printf("   OSS Credentials: AccessKey=%s, SecretKey=%s, SessionToken=%s\n",
+			credentials.AccessKey, credentials.SecretAccessKey, credentials.SessionToken)
 	}
 	fmt.Println()
 
@@ -100,16 +102,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse Azure URI: %v", err)
 	}
-	fmt.Printf("   URI: %s\n", azureURI)
+	fmt.Printf("   URI (credentials omitted): %s\n", azureConfig.ToURI())
 	fmt.Printf("   Config: Type=%s, Bucket=%s, Prefix=%s, Endpoint=%s\n",
 		azureConfig.Type, azureConfig.Bucket, azureConfig.Prefix, azureConfig.Endpoint)
 	if azureConfig.Azure != nil {
-		maskedAccountKey := "***REDACTED***"
-		if azureConfig.Azure.AccountKey == "" {
-			maskedAccountKey = "<empty>"
-		}
-		fmt.Printf("   Azure Config: AccountName=%s, AccountKey=%s\n",
-			azureConfig.Azure.AccountName, maskedAccountKey)
+		credentials := azureConfig.Azure.Redacted()
+		fmt.Printf("   Azure Config: AccountName=%s, AccountKey=%s, SASToken=%s\n",
+			credentials.AccountName, credentials.AccountKey, credentials.SASToken)
 	}
 	fmt.Println()
 
@@ -152,6 +151,6 @@ func main() {
 	fmt.Println("- shared-pool-id: Shared pool cluster ID")
 	fmt.Println("- s3-force-path-style: Force path-style requests for S3")
 	fmt.Println()
-	fmt.Println("Note: This demo uses example credentials. In production, use real credentials")
-	fmt.Println("      or configure through environment variables/AWS profiles.")
+	fmt.Println("Note: This demo uses example credentials and omits them from output.")
+	fmt.Println("      Never log credential-bearing URIs or pass them through insecure channels.")
 }

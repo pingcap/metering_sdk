@@ -406,3 +406,37 @@ func TestMetaWriterWithCategory(t *testing.T) {
 		assert.Equal(t, 3, count, "Expected 3 files for different categories")
 	})
 }
+
+func TestMetaWriterRejectsInvalidTenantIdentifiers(t *testing.T) {
+	tests := []struct {
+		name        string
+		clusterID   string
+		category    string
+		expectedErr string
+	}{
+		{name: "empty cluster", clusterID: "", expectedErr: "cluster ID cannot be empty"},
+		{name: "cluster with slash", clusterID: "tenant/other", expectedErr: "cluster ID contains invalid characters"},
+		{name: "cluster with colon", clusterID: "tenant:other", expectedErr: "cluster ID contains invalid characters"},
+		{name: "category with slash", clusterID: "tenant", category: "tidb/other", expectedErr: "category contains invalid characters"},
+		{name: "category with colon", clusterID: "tenant", category: "tidb:other", expectedErr: "category contains invalid characters"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockProvider := NewMockStorageProvider()
+			metaWriter := NewMetaWriter(mockProvider, config.DefaultConfig())
+			defer metaWriter.Close()
+
+			err := metaWriter.Write(context.Background(), &common.MetaData{
+				ClusterID: tt.clusterID,
+				Type:      common.MetaTypeLogic,
+				Category:  tt.category,
+				ModifyTS:  1000,
+			})
+			if assert.Error(t, err) {
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+			assert.Empty(t, mockProvider.uploadedData)
+		})
+	}
+}

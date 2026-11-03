@@ -719,6 +719,16 @@ oss://[bucket]/[prefix]?region-id=[region]&access-key=[key]&secret-access-key=[s
 localfs:///[path]?create-dirs=[true|false]&permissions=[mode]
 ```
 
+### URI Serialization and LocalFS Paths
+
+`ToURI` escapes path components so characters such as `?` and `#` in a prefix or LocalFS base path remain path data and cannot create query parameters or fragments. Cloud bucket names must be valid URI host values; `NewFromURI` rejects invalid host encodings.
+
+`ToURI` omits access keys, secret access keys, session tokens, Azure account keys, and SAS tokens. Role ARNs and Azure account names are retained. Credential configuration structs also provide `Redacted()` methods that return copies with credential fields masked for safe display.
+
+`ToURIWithCredentials` preserves plaintext credentials for explicit configuration round trips. Its return value must be treated as a secret: never log or print it, and do not pass it through shell history, command-line arguments, container inspect output, or other insecure channels.
+
+Absolute LocalFS paths use `localfs:///data/storage`. Relative paths use a `./` marker, for example `localfs://./metering-data` for `./metering-data`. Relative paths without an explicit `./` prefix are normalized to the same form.
+
 ### URI Parameters
 
 - `region-id` / `region`: Region identifier for cloud providers (both parameter names supported)
@@ -830,6 +840,8 @@ You can use URI configuration with environment variables:
 # Set environment variable
 export METERING_STORAGE_URI="s3://prod-metering-bucket/data?region-id=us-west-2&assume-role-arn=arn:aws:iam::123456789012:role/MeteringRole"
 ```
+
+Credential-bearing URIs and environment variables containing them must be treated as secrets and must not be printed or logged. Prefer provider credential chains, workload identity, or a secret manager over embedding long-lived secrets directly in shell commands.
 
 ```go
 package main

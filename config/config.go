@@ -153,6 +153,44 @@ type MeteringAzureConfig struct {
 	SASToken    string `yaml:"sas-token,omitempty" toml:"sas-token,omitempty" json:"sas-token,omitempty" reloadable:"false"`
 }
 
+func redactSecret(secret string) string {
+	if secret == "" {
+		return ""
+	}
+	return "***REDACTED***"
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c MeteringAWSConfig) Redacted() MeteringAWSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c MeteringOSSConfig) Redacted() MeteringOSSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c MeteringCOSConfig) Redacted() MeteringCOSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c MeteringAzureConfig) Redacted() MeteringAzureConfig {
+	c.AccountKey = redactSecret(c.AccountKey)
+	c.SASToken = redactSecret(c.SASToken)
+	return c
+}
+
 // MeteringLocalFSConfig local filesystem specific configuration for high-level config
 type MeteringLocalFSConfig struct {
 	BasePath    string `yaml:"base-path,omitempty" toml:"base-path,omitempty" json:"base-path,omitempty" reloadable:"false"`
@@ -428,6 +466,7 @@ func (mc *MeteringConfig) WithCOSRoleARN(roleARN string) *MeteringConfig {
 }
 
 // NewFromURI creates a new MeteringConfig from a URI string.
+// Credential-bearing URIs are sensitive and must not be logged or passed through insecure channels.
 // URI format: [scheme]://[bucket]/[prefix]?[parameters]
 // Examples:
 //   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
@@ -435,6 +474,7 @@ func (mc *MeteringConfig) WithCOSRoleARN(roleARN string) *MeteringConfig {
 //   - cos://my-bucket/logs?region-id=ap-beijing&assume-role-arn=qcs::cam::uin/123:roleName/metering
 //   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
+//   - localfs://./metering-data (relative LocalFS path)
 //
 // Supported schemes: s3, oss, cos, azure (alias: azblob), localfs, file
 // Common parameters: region-id/region, endpoint, shared-pool-id
@@ -471,7 +511,19 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 	if config.Type == storage.ProviderTypeLocalFS {
 		// For localfs, handle different path formats
 		var basePath string
-		if parsedURL.Host != "" {
+		if parsedURL.Host == "." {
+			switch parsedURL.Path {
+			case "":
+				basePath = "."
+			case "/":
+				basePath = "./"
+			default:
+				basePath = "." + parsedURL.Path
+				if strings.HasPrefix(basePath, "./../") {
+					basePath = strings.TrimPrefix(basePath, "./")
+				}
+			}
+		} else if parsedURL.Host != "" {
 			// For URI like "localfs://host/path", combine host and path
 			// Ensure proper path construction without double slashes
 			hostPath := "/" + parsedURL.Host
@@ -660,53 +712,55 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 	return config, nil
 }
 
-// ToURI converts MeteringConfig to a URI string.
+// ToURI converts MeteringConfig to a URI string without credential secrets.
+// Access keys, secret access keys, session tokens, Azure account keys, and SAS tokens are omitted.
 // URI format: [scheme]://[bucket]/[prefix]?[parameters]
 // Examples:
 //   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
-//   - oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE
+//   - oss://my-bucket/logs?region-id=oss-ap-southeast-1
 //   - cos://my-bucket/logs?region-id=ap-beijing
-//   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
+//   - azure://my-container/prefix?account-name=acct&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
+//   - localfs://./metering-data (relative LocalFS path)
 func (mc *MeteringConfig) ToURI() string {
-	var uri strings.Builder
-	var params url.Values = make(url.Values)
+	return mc.toURI(false)
+}
+
+// ToURIWithCredentials converts MeteringConfig to a URI string including plaintext credentials.
+// The returned URI is sensitive and must not be logged, printed, or passed through insecure channels.
+func (mc *MeteringConfig) ToURIWithCredentials() string {
+	return mc.toURI(true)
+}
+
+func (mc *MeteringConfig) toURI(includeCredentials bool) string {
+	uri := &url.URL{}
+	params := make(url.Values)
 
 	// Determine scheme based on provider type
 	switch mc.Type {
 	case storage.ProviderTypeS3:
-		uri.WriteString("s3://")
+		uri.Scheme = "s3"
 	case storage.ProviderTypeOSS:
-		uri.WriteString("oss://")
+		uri.Scheme = "oss"
 	case storage.ProviderTypeCOS:
-		uri.WriteString("cos://")
+		uri.Scheme = "cos"
 	case storage.ProviderTypeAzure:
-		uri.WriteString("azure://")
+		uri.Scheme = "azure"
 	case storage.ProviderTypeLocalFS:
-		uri.WriteString("localfs://")
+		uri.Scheme = "localfs"
 	default:
 		return ""
 	}
 
 	// Build host and path based on provider type
 	if mc.Type == storage.ProviderTypeLocalFS {
-		// For localfs, handle the base path properly
-		if mc.LocalFS != nil && mc.LocalFS.BasePath != "" {
-			// Remove any leading slash to avoid double slashes with scheme
-			basePath := strings.TrimPrefix(mc.LocalFS.BasePath, "/")
-			uri.WriteString("/")
-			uri.WriteString(basePath)
+		if mc.LocalFS != nil {
+			setLocalFSURIPath(uri, mc.LocalFS.BasePath)
 		}
 	} else {
-		// For cloud providers, host is bucket name
-		if mc.Bucket != "" {
-			uri.WriteString(mc.Bucket)
-		}
-
-		// Path is the prefix
+		uri.Host = mc.Bucket
 		if mc.Prefix != "" {
-			uri.WriteString("/")
-			uri.WriteString(mc.Prefix)
+			uri.Path = "/" + mc.Prefix
 		}
 	}
 
@@ -725,13 +779,13 @@ func (mc *MeteringConfig) ToURI() string {
 	switch mc.Type {
 	case storage.ProviderTypeS3:
 		if mc.AWS != nil {
-			if mc.AWS.AccessKey != "" {
+			if includeCredentials && mc.AWS.AccessKey != "" {
 				params.Set("access-key", mc.AWS.AccessKey)
 			}
-			if mc.AWS.SecretAccessKey != "" {
+			if includeCredentials && mc.AWS.SecretAccessKey != "" {
 				params.Set("secret-access-key", mc.AWS.SecretAccessKey)
 			}
-			if mc.AWS.SessionToken != "" {
+			if includeCredentials && mc.AWS.SessionToken != "" {
 				params.Set("session-token", mc.AWS.SessionToken)
 			}
 			if mc.AWS.AssumeRoleARN != "" {
@@ -744,13 +798,13 @@ func (mc *MeteringConfig) ToURI() string {
 
 	case storage.ProviderTypeOSS:
 		if mc.OSS != nil {
-			if mc.OSS.AccessKey != "" {
+			if includeCredentials && mc.OSS.AccessKey != "" {
 				params.Set("access-key", mc.OSS.AccessKey)
 			}
-			if mc.OSS.SecretAccessKey != "" {
+			if includeCredentials && mc.OSS.SecretAccessKey != "" {
 				params.Set("secret-access-key", mc.OSS.SecretAccessKey)
 			}
-			if mc.OSS.SessionToken != "" {
+			if includeCredentials && mc.OSS.SessionToken != "" {
 				params.Set("session-token", mc.OSS.SessionToken)
 			}
 			if mc.OSS.AssumeRoleARN != "" {
@@ -760,13 +814,13 @@ func (mc *MeteringConfig) ToURI() string {
 
 	case storage.ProviderTypeCOS:
 		if mc.COS != nil {
-			if mc.COS.AccessKey != "" {
+			if includeCredentials && mc.COS.AccessKey != "" {
 				params.Set("access-key", mc.COS.AccessKey)
 			}
-			if mc.COS.SecretAccessKey != "" {
+			if includeCredentials && mc.COS.SecretAccessKey != "" {
 				params.Set("secret-access-key", mc.COS.SecretAccessKey)
 			}
-			if mc.COS.SessionToken != "" {
+			if includeCredentials && mc.COS.SessionToken != "" {
 				params.Set("session-token", mc.COS.SessionToken)
 			}
 			if mc.COS.AssumeRoleARN != "" {
@@ -779,10 +833,10 @@ func (mc *MeteringConfig) ToURI() string {
 			if mc.Azure.AccountName != "" {
 				params.Set("account-name", mc.Azure.AccountName)
 			}
-			if mc.Azure.AccountKey != "" {
+			if includeCredentials && mc.Azure.AccountKey != "" {
 				params.Set("account-key", mc.Azure.AccountKey)
 			}
-			if mc.Azure.SASToken != "" {
+			if includeCredentials && mc.Azure.SASToken != "" {
 				params.Set("sas-token", mc.Azure.SASToken)
 			}
 		}
@@ -798,11 +852,32 @@ func (mc *MeteringConfig) ToURI() string {
 		}
 	}
 
-	// Add query parameters if any exist
 	if len(params) > 0 {
-		uri.WriteString("?")
-		uri.WriteString(params.Encode())
+		uri.RawQuery = params.Encode()
+	}
+	serialized := uri.String()
+	if uri.Host == "" && uri.Path == "" {
+		return uri.Scheme + "://" + strings.TrimPrefix(serialized, uri.Scheme+":")
+	}
+	return serialized
+}
+
+func setLocalFSURIPath(uri *url.URL, basePath string) {
+	if basePath == "" {
+		return
+	}
+	if strings.HasPrefix(basePath, "/") {
+		uri.Path = basePath
+		return
 	}
 
-	return uri.String()
+	uri.Host = "."
+	switch basePath {
+	case ".":
+		return
+	case "./":
+		uri.Path = "/"
+	default:
+		uri.Path = "/" + strings.TrimPrefix(basePath, "./")
+	}
 }

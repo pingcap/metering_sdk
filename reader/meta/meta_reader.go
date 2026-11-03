@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
 	"github.com/pingcap/metering_sdk/internal/cache"
+	"github.com/pingcap/metering_sdk/internal/utils"
 	"github.com/pingcap/metering_sdk/reader"
 	"github.com/pingcap/metering_sdk/storage"
 	"go.uber.org/zap"
@@ -99,6 +101,16 @@ func NewMetaReader(provider storage.ObjectStorageProvider, cfg *config.Config, r
 	return reader, nil
 }
 
+func validateTenantIdentifiers(clusterID, category string) error {
+	if err := utils.ValidateClusterID(clusterID); err != nil {
+		return err
+	}
+	if category != "" {
+		return utils.ValidateCategory(category)
+	}
+	return nil
+}
+
 // Read reads the latest metadata for the specified cluster at or before the specified timestamp
 func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64) (*common.MetaData, error) {
 	return r.ReadWithCategory(ctx, clusterID, "", timestamp)
@@ -106,6 +118,10 @@ func (r *MetaReader) Read(ctx context.Context, clusterID string, timestamp int64
 
 // ReadWithCategory reads the latest metadata for the specified cluster and category at or before the specified timestamp
 func (r *MetaReader) ReadWithCategory(ctx context.Context, clusterID string, category string, timestamp int64) (*common.MetaData, error) {
+	if err := validateTenantIdentifiers(clusterID, category); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -118,21 +134,25 @@ func (r *MetaReader) ReadWithCategory(ctx context.Context, clusterID string, cat
 	// Use the incoming timestamp as cache key for exact lookup
 	var cacheKey string
 	if category != "" {
-		cacheKey = fmt.Sprintf("meta:%s:%s:%d", category, clusterID, timestamp)
+		cacheKey = fmt.Sprintf("meta:v2:read-with-category:%s:%s:%d", category, clusterID, timestamp)
 	} else {
-		cacheKey = fmt.Sprintf("meta:%s:%d", clusterID, timestamp)
+		cacheKey = fmt.Sprintf("meta:v2:read:%s:%d", clusterID, timestamp)
 	}
 
 	if r.cache != nil {
 		if cached, found := r.cache.Get(cacheKey); found {
 			if metaData, ok := cached.(*common.MetaData); ok {
+				if err := validateMetadataOwnership(metaData, clusterID, category, ""); err != nil {
+					return nil, fmt.Errorf("cached metadata ownership mismatch: %w", err)
+				}
+				result := cloneMetaData(metaData)
 				r.logger.Debug("Meta data cache hit",
 					zap.String("cluster_id", clusterID),
 					zap.String("category", category),
 					zap.Int64("timestamp", timestamp),
-					zap.Int64("actual_timestamp", metaData.ModifyTS),
+					zap.Int64("actual_timestamp", result.ModifyTS),
 				)
-				return metaData, nil
+				return result, nil
 			}
 		}
 	}
@@ -145,7 +165,7 @@ func (r *MetaReader) ReadWithCategory(ctx context.Context, clusterID string, cat
 
 	// Store in cache (using incoming timestamp as key)
 	if r.cache != nil && metaData != nil {
-		if err := r.cache.Set(cacheKey, metaData); err != nil {
+		if err := r.cache.Set(cacheKey, cloneMetaData(metaData)); err != nil {
 			r.logger.Warn("Failed to cache meta data",
 				zap.String("cluster_id", clusterID),
 				zap.String("category", category),
@@ -173,6 +193,10 @@ func (r *MetaReader) ReadByType(ctx context.Context, clusterID string, metaType 
 
 // ReadByTypeWithCategory reads the latest metadata for the specified cluster, type, and category at or before the specified timestamp
 func (r *MetaReader) ReadByTypeWithCategory(ctx context.Context, clusterID string, metaType common.MetaType, category string, timestamp int64) (*common.MetaData, error) {
+	if err := validateTenantIdentifiers(clusterID, category); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -191,22 +215,26 @@ func (r *MetaReader) ReadByTypeWithCategory(ctx context.Context, clusterID strin
 	// Use type-specific cache key
 	var cacheKey string
 	if category != "" {
-		cacheKey = fmt.Sprintf("meta:%s:%s:%s:%d", string(metaType), category, clusterID, timestamp)
+		cacheKey = fmt.Sprintf("meta:v2:read-by-type-with-category:%s:%s:%s:%d", string(metaType), category, clusterID, timestamp)
 	} else {
-		cacheKey = fmt.Sprintf("meta:%s:%s:%d", string(metaType), clusterID, timestamp)
+		cacheKey = fmt.Sprintf("meta:v2:read-by-type:%s:%s:%d", string(metaType), clusterID, timestamp)
 	}
 
 	if r.cache != nil {
 		if cached, found := r.cache.Get(cacheKey); found {
 			if metaData, ok := cached.(*common.MetaData); ok {
+				if err := validateMetadataOwnership(metaData, clusterID, category, metaType); err != nil {
+					return nil, fmt.Errorf("cached metadata ownership mismatch: %w", err)
+				}
+				result := cloneMetaData(metaData)
 				r.logger.Debug("Meta data cache hit",
 					zap.String("cluster_id", clusterID),
 					zap.String("type", string(metaType)),
 					zap.String("category", category),
 					zap.Int64("timestamp", timestamp),
-					zap.Int64("actual_timestamp", metaData.ModifyTS),
+					zap.Int64("actual_timestamp", result.ModifyTS),
 				)
-				return metaData, nil
+				return result, nil
 			}
 		}
 	}
@@ -219,7 +247,7 @@ func (r *MetaReader) ReadByTypeWithCategory(ctx context.Context, clusterID strin
 
 	// Store in cache
 	if r.cache != nil && metaData != nil {
-		if err := r.cache.Set(cacheKey, metaData); err != nil {
+		if err := r.cache.Set(cacheKey, cloneMetaData(metaData)); err != nil {
 			r.logger.Warn("Failed to cache meta data",
 				zap.String("cluster_id", clusterID),
 				zap.String("type", string(metaType)),
@@ -317,6 +345,10 @@ func (r *MetaReader) readLatestFromStorageWithCategory(ctx context.Context, clus
 	var latestTimestamp int64 = -1
 
 	for _, file := range files {
+		if !isDirectChildOfPrefix(file, prefix) {
+			continue
+		}
+
 		// Parse timestamp from filename
 		fileTimestamp, err := r.extractTimestampFromFilename(file)
 		if err != nil {
@@ -354,9 +386,9 @@ func (r *MetaReader) readLatestFromStorageWithCategory(ctx context.Context, clus
 	if !ok {
 		return nil, fmt.Errorf("invalid data type from file %s", latestFile)
 	}
-	// Add more information
-	metaData.ClusterID = clusterID
-	metaData.Category = category
+	if err := validateMetadataOwnership(metaData, clusterID, category, ""); err != nil {
+		return nil, fmt.Errorf("metadata ownership mismatch for file %s: %w", latestFile, err)
+	}
 	metaData.ModifyTS = latestTimestamp
 	return metaData, nil
 }
@@ -391,6 +423,10 @@ func (r *MetaReader) readLatestFromStorageByTypeWithCategory(ctx context.Context
 	var latestTimestamp int64 = -1
 
 	for _, file := range files {
+		if !isDirectChildOfPrefix(file, prefix) {
+			continue
+		}
+
 		// Parse timestamp from filename
 		fileTimestamp, err := r.extractTimestampFromFilename(file)
 		if err != nil {
@@ -429,12 +465,68 @@ func (r *MetaReader) readLatestFromStorageByTypeWithCategory(ctx context.Context
 		return nil, fmt.Errorf("invalid data type from file %s", latestFile)
 	}
 
-	// Ensure the metadata has the correct information
-	metaData.ClusterID = clusterID
-	metaData.Type = metaType
-	metaData.Category = category
+	if err := validateMetadataOwnership(metaData, clusterID, category, metaType); err != nil {
+		return nil, fmt.Errorf("metadata ownership mismatch for file %s: %w", latestFile, err)
+	}
 	metaData.ModifyTS = latestTimestamp
 	return metaData, nil
+}
+
+func isDirectChildOfPrefix(filename, prefix string) bool {
+	actualDir := path.Dir(strings.TrimPrefix(filename, "/"))
+	expectedDir := strings.Trim(prefix, "/")
+	return actualDir == expectedDir || strings.HasSuffix(actualDir, "/"+expectedDir)
+}
+
+func cloneMetaData(metaData *common.MetaData) *common.MetaData {
+	if metaData == nil {
+		return nil
+	}
+	cloned := *metaData
+	cloned.Metadata = cloneMetadataMap(metaData.Metadata)
+	return &cloned
+}
+
+func cloneMetadataMap(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+	cloned := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		cloned[key] = cloneMetadataValue(value)
+	}
+	return cloned
+}
+
+func cloneMetadataValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return cloneMetadataMap(typed)
+	case []interface{}:
+		cloned := make([]interface{}, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneMetadataValue(item)
+		}
+		return cloned
+	default:
+		return value
+	}
+}
+
+func validateMetadataOwnership(metaData *common.MetaData, clusterID, category string, metaType common.MetaType) error {
+	if metaData == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+	if metaData.ClusterID != clusterID {
+		return fmt.Errorf("cluster ID mismatch: expected %q, got %q", clusterID, metaData.ClusterID)
+	}
+	if metaData.Category != category {
+		return fmt.Errorf("category mismatch: expected %q, got %q", category, metaData.Category)
+	}
+	if metaType != "" && metaData.Type != metaType {
+		return fmt.Errorf("type mismatch: expected %q, got %q", metaType, metaData.Type)
+	}
+	return nil
 }
 
 // extractTimestampFromFilename extracts timestamp from filename

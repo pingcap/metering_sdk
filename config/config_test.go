@@ -874,8 +874,8 @@ func TestNewFromURI_PathConstruction(t *testing.T) {
 	}
 }
 
-// TestToURI tests converting MeteringConfig to URI strings
-func TestToURI(t *testing.T) {
+// TestToURIWithCredentials tests converting MeteringConfig to credential-bearing URI strings
+func TestToURIWithCredentials(t *testing.T) {
 	tests := []struct {
 		name   string
 		config *MeteringConfig
@@ -989,14 +989,14 @@ func TestToURI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.ToURI()
+			got := tt.config.ToURIWithCredentials()
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-// TestToURI_RoundTrip tests that NewFromURI and ToURI are consistent
-func TestToURI_RoundTrip(t *testing.T) {
+// TestToURIWithCredentials_RoundTrip tests that NewFromURI and ToURIWithCredentials preserve configuration
+func TestToURIWithCredentials_RoundTrip(t *testing.T) {
 	testURIs := []string{
 		"s3://my-bucket/data?region-id=us-east-1",
 		"oss://oss-bucket/logs?region-id=oss-ap-southeast-1&access-key=test",
@@ -1012,7 +1012,7 @@ func TestToURI_RoundTrip(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Convert config back to URI
-			regeneratedURI := config.ToURI()
+			regeneratedURI := config.ToURIWithCredentials()
 
 			// Parse the regenerated URI again
 			configFromRegenerated, err := NewFromURI(regeneratedURI)
@@ -1054,4 +1054,221 @@ func TestToURI_RoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestToURI_RoundTripDoesNotInjectQuery(t *testing.T) {
+	original := &MeteringConfig{
+		Type:     storage.ProviderTypeS3,
+		Bucket:   "tenant-bucket",
+		Prefix:   "tenant?endpoint=http://evil.example.com&access-key=attacker&secret-access-key=attacker-secret&assume-role-arn=&",
+		Endpoint: "https://s3.example.com",
+		AWS: &MeteringAWSConfig{
+			AssumeRoleARN: "arn:aws:iam::123456789012:role/LegitimateRole",
+		},
+	}
+
+	uri := original.ToURI()
+	parsed, err := NewFromURI(uri)
+	assert.NoError(t, err)
+	if !assert.NotNil(t, parsed) {
+		return
+	}
+	assert.Equal(t, original.Bucket, parsed.Bucket)
+	assert.Equal(t, original.Prefix, parsed.Prefix)
+	assert.Equal(t, original.Endpoint, parsed.Endpoint)
+	if assert.NotNil(t, parsed.AWS) {
+		assert.Empty(t, parsed.AWS.AccessKey)
+		assert.Empty(t, parsed.AWS.SecretAccessKey)
+		assert.Equal(t, original.AWS.AssumeRoleARN, parsed.AWS.AssumeRoleARN)
+	}
+}
+
+func TestToURI_InvalidBucketCannotInjectQuery(t *testing.T) {
+	original := &MeteringConfig{
+		Type:     storage.ProviderTypeS3,
+		Bucket:   "tenant-bucket?endpoint=http://evil.example.com&access-key=attacker&secret-access-key=attacker-secret",
+		Endpoint: "https://s3.example.com",
+	}
+
+	uri := original.ToURI()
+	assert.NotContains(t, uri, "?endpoint=http://evil.example.com")
+	parsed, err := NewFromURI(uri)
+	assert.Error(t, err)
+	assert.Nil(t, parsed)
+}
+
+func TestToURI_RoundTripLocalFSRelativePaths(t *testing.T) {
+	tests := []struct {
+		name         string
+		basePath     string
+		wantURI      string
+		wantBasePath string
+	}{
+		{name: "current directory child", basePath: "./metering-data", wantURI: "localfs://./metering-data", wantBasePath: "./metering-data"},
+		{name: "implicit relative path", basePath: "metering-data", wantURI: "localfs://./metering-data", wantBasePath: "./metering-data"},
+		{name: "parent directory", basePath: "../metering-data", wantURI: "localfs://./../metering-data", wantBasePath: "../metering-data"},
+		{name: "current directory", basePath: ".", wantURI: "localfs://.", wantBasePath: "."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := NewMeteringConfig().WithLocalFS(tt.basePath)
+			uri := original.ToURI()
+			assert.Equal(t, tt.wantURI, uri)
+			parsed, err := NewFromURI(uri)
+			assert.NoError(t, err)
+			if assert.NotNil(t, parsed) && assert.NotNil(t, parsed.LocalFS) {
+				assert.Equal(t, tt.wantBasePath, parsed.LocalFS.BasePath)
+			}
+		})
+	}
+}
+
+func TestToURI_RoundTripLocalFSEscapesBasePath(t *testing.T) {
+	original := NewMeteringConfig().WithLocalFS("./data?permissions=0777&create-dirs=false")
+	uri := original.ToURI()
+	assert.Equal(t, "localfs://./data%3Fpermissions=0777&create-dirs=false", uri)
+
+	parsed, err := NewFromURI(uri)
+	assert.NoError(t, err)
+	if assert.NotNil(t, parsed) && assert.NotNil(t, parsed.LocalFS) {
+		assert.Equal(t, original.LocalFS.BasePath, parsed.LocalFS.BasePath)
+		assert.True(t, parsed.LocalFS.CreateDirs)
+		assert.Empty(t, parsed.LocalFS.Permissions)
+	}
+}
+
+func TestToURI_OmitsCredentials(t *testing.T) {
+	tests := []struct {
+		name            string
+		config          *MeteringConfig
+		secretValues    []string
+		requiredContent []string
+	}{
+		{
+			name: "AWS",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeS3,
+				AWS: &MeteringAWSConfig{
+					AccessKey:        "aws-access",
+					SecretAccessKey:  "aws-secret",
+					SessionToken:     "aws-token",
+					AssumeRoleARN:    "aws-role",
+					S3ForcePathStyle: true,
+				},
+			},
+			secretValues:    []string{"aws-access", "aws-secret", "aws-token"},
+			requiredContent: []string{"assume-role-arn=aws-role", "s3-force-path-style=true"},
+		},
+		{
+			name: "OSS",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeOSS,
+				OSS: &MeteringOSSConfig{
+					AccessKey:       "oss-access",
+					SecretAccessKey: "oss-secret",
+					SessionToken:    "oss-token",
+					AssumeRoleARN:   "oss-role",
+				},
+			},
+			secretValues:    []string{"oss-access", "oss-secret", "oss-token"},
+			requiredContent: []string{"assume-role-arn=oss-role"},
+		},
+		{
+			name: "COS",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeCOS,
+				COS: &MeteringCOSConfig{
+					AccessKey:       "cos-access",
+					SecretAccessKey: "cos-secret",
+					SessionToken:    "cos-token",
+					AssumeRoleARN:   "cos-role",
+				},
+			},
+			secretValues:    []string{"cos-access", "cos-secret", "cos-token"},
+			requiredContent: []string{"assume-role-arn=cos-role"},
+		},
+		{
+			name: "Azure",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeAzure,
+				Azure: &MeteringAzureConfig{
+					AccountName: "azure-account",
+					AccountKey:  "azure-key",
+					SASToken:    "azure-sas",
+				},
+			},
+			secretValues:    []string{"azure-key", "azure-sas"},
+			requiredContent: []string{"account-name=azure-account"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uri := tt.config.ToURI()
+			for _, value := range tt.secretValues {
+				assert.NotContains(t, uri, value)
+			}
+			for _, parameter := range []string{"access-key=", "secret-access-key=", "session-token=", "account-key=", "sas-token="} {
+				assert.NotContains(t, uri, parameter)
+			}
+			for _, content := range tt.requiredContent {
+				assert.Contains(t, uri, content)
+			}
+		})
+	}
+}
+
+func TestCredentialConfigsRedacted(t *testing.T) {
+	const masked = "***REDACTED***"
+
+	t.Run("AWS", func(t *testing.T) {
+		original := MeteringAWSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role", S3ForcePathStyle: true}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.True(t, redacted.S3ForcePathStyle)
+		assert.Equal(t, "access", original.AccessKey)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+		assert.Equal(t, "token", original.SessionToken)
+	})
+
+	t.Run("OSS", func(t *testing.T) {
+		original := MeteringOSSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role"}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+	})
+
+	t.Run("COS", func(t *testing.T) {
+		original := MeteringCOSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role"}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+	})
+
+	t.Run("Azure", func(t *testing.T) {
+		original := MeteringAzureConfig{AccountName: "account", AccountKey: "key", SASToken: "sas"}
+		redacted := original.Redacted()
+		assert.Equal(t, original.AccountName, redacted.AccountName)
+		assert.Equal(t, masked, redacted.AccountKey)
+		assert.Equal(t, masked, redacted.SASToken)
+		assert.Equal(t, "key", original.AccountKey)
+		assert.Equal(t, "sas", original.SASToken)
+	})
+
+	t.Run("empty secrets remain empty", func(t *testing.T) {
+		redacted := (MeteringAWSConfig{}).Redacted()
+		assert.Empty(t, redacted.AccessKey)
+		assert.Empty(t, redacted.SecretAccessKey)
+		assert.Empty(t, redacted.SessionToken)
+	})
 }

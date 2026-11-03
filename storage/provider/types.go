@@ -77,6 +77,44 @@ type COSConfig struct {
 	SessionToken    string `json:"session_token,omitempty"`
 }
 
+func redactSecret(secret string) string {
+	if secret == "" {
+		return ""
+	}
+	return "***REDACTED***"
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c AWSConfig) Redacted() AWSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c OSSConfig) Redacted() OSSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c COSConfig) Redacted() COSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c AzureConfig) Redacted() AzureConfig {
+	c.AccountKey = redactSecret(c.AccountKey)
+	c.SASToken = redactSecret(c.SASToken)
+	return c
+}
+
 // LocalFSConfig local filesystem specific configuration
 type LocalFSConfig struct {
 	BasePath    string `json:"base_path"`             // base path for local filesystem

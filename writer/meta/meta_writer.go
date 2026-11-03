@@ -10,6 +10,7 @@ import (
 
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
+	"github.com/pingcap/metering_sdk/internal/utils"
 	"github.com/pingcap/metering_sdk/storage"
 	"github.com/pingcap/metering_sdk/writer"
 	"go.uber.org/zap"
@@ -53,6 +54,14 @@ func (w *MetaWriter) Write(ctx context.Context, data interface{}) error {
 	// Validate metadata type
 	if !common.ValidMetaTypes[metaData.Type] {
 		return fmt.Errorf("invalid metadata type: %s, must be one of: logic, sharedpool", metaData.Type)
+	}
+	if err := utils.ValidateClusterID(metaData.ClusterID); err != nil {
+		return err
+	}
+	if metaData.Category != "" {
+		if err := utils.ValidateCategory(metaData.Category); err != nil {
+			return err
+		}
 	}
 
 	// Build S3 path based on whether Category is set
