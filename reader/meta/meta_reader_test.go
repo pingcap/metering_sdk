@@ -503,13 +503,13 @@ func TestMetaReader_CacheKeyLogic(t *testing.T) {
 	assert.Equal(t, int64(2000), result5.ModifyTS, "Expected cache hit ModifyTS=2000 but got %d", result5.ModifyTS)
 
 	// Verify cache should have 3 entries (ts=1500, ts=2500, ts=3500)
-	keys := metaReader.cache.KeysWithPrefix("meta:test-cluster:")
+	keys := metaReader.cache.KeysWithPrefix("meta:v2:read:test-cluster:")
 	assert.Equal(t, 3, len(keys), "Expected 3 cache keys but got %d", len(keys))
 
 	expectedKeys := map[string]bool{
-		"meta:test-cluster:1500": true,
-		"meta:test-cluster:2500": true,
-		"meta:test-cluster:3500": true,
+		"meta:v2:read:test-cluster:1500": true,
+		"meta:v2:read:test-cluster:2500": true,
+		"meta:v2:read:test-cluster:3500": true,
 	}
 
 	for _, key := range keys {
@@ -827,7 +827,7 @@ func TestMetaReader_CategoryWithCache(t *testing.T) {
 	assert.Equal(t, result1.ModifyTS, result2.ModifyTS, "Cache should return same result")
 
 	// Verify cache contains the correct key
-	cacheKey := "meta:logic:tidb:cache-test-cluster:3500"
+	cacheKey := "meta:v2:read-by-type-with-category:logic:tidb:cache-test-cluster:3500"
 	cached, found := metaReader.cache.Get(cacheKey)
 	assert.True(t, found, "Cache should contain the key")
 	assert.NotNil(t, cached, "Cached value should not be nil")
@@ -895,4 +895,299 @@ func TestMetaReader_MixedCategoryAndNonCategory(t *testing.T) {
 		assert.Equal(t, "tidb", result.Category, "Expected tidb category")
 		assert.Equal(t, "test-cluster-with-category", result.Metadata["name"].(string))
 	})
+}
+
+func TestMetaReader_DoesNotSelectForeignNestedMetadata(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+	requestedData := &common.MetaData{
+		ClusterID: "tenant-category",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  1000,
+		Metadata:  map[string]interface{}{"owner": "requested-tenant"},
+	}
+	foreignData := &common.MetaData{
+		ClusterID: "foreign-cluster",
+		Type:      common.MetaTypeLogic,
+		Category:  "tenant-category",
+		ModifyTS:  2000,
+		Metadata:  map[string]interface{}{"owner": "foreign-tenant"},
+	}
+
+	requestedBytes, err := createCompressedTestData(requestedData)
+	assert.NoError(t, err)
+	foreignBytes, err := createCompressedTestData(foreignData)
+	assert.NoError(t, err)
+	provider.files["metering/meta/logic/tenant-category/1000.json.gz"] = requestedBytes
+	provider.files["metering/meta/logic/tenant-category/foreign-cluster/2000.json.gz"] = foreignBytes
+
+	metaReader, err := NewMetaReader(provider, &config.Config{Logger: zap.NewNop()}, nil)
+	assert.NoError(t, err)
+	result, err := metaReader.ReadByType(context.Background(), "tenant-category", common.MetaTypeLogic, 2500)
+	assert.NoError(t, err)
+	if assert.NotNil(t, result) {
+		assert.Equal(t, int64(1000), result.ModifyTS)
+		assert.Equal(t, "requested-tenant", result.Metadata["owner"])
+	}
+}
+
+func TestMetaReader_RejectsForeignMetadataIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		metaType common.MetaType
+		category string
+		read     func(*MetaReader) (*common.MetaData, error)
+	}{
+		{
+			name:     "untyped read",
+			path:     "metering/meta/tidb/requested-cluster/1000.json.gz",
+			category: "tidb",
+			read: func(r *MetaReader) (*common.MetaData, error) {
+				return r.ReadWithCategory(context.Background(), "requested-cluster", "tidb", 1500)
+			},
+		},
+		{
+			name:     "typed read",
+			path:     "metering/meta/logic/tidb/requested-cluster/1000.json.gz",
+			metaType: common.MetaTypeLogic,
+			category: "tidb",
+			read: func(r *MetaReader) (*common.MetaData, error) {
+				return r.ReadByTypeWithCategory(context.Background(), "requested-cluster", common.MetaTypeLogic, "tidb", 1500)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := newMockObjectStorageProvider()
+			compressed, err := createCompressedTestData(&common.MetaData{
+				ClusterID: "foreign-cluster",
+				Type:      tt.metaType,
+				Category:  tt.category,
+				ModifyTS:  1000,
+				Metadata:  map[string]interface{}{"owner": "foreign-tenant"},
+			})
+			assert.NoError(t, err)
+			provider.files[tt.path] = compressed
+
+			metaReader, err := NewMetaReader(provider, &config.Config{Logger: zap.NewNop()}, nil)
+			assert.NoError(t, err)
+			result, err := tt.read(metaReader)
+			assert.Error(t, err)
+			assert.Nil(t, result)
+		})
+	}
+}
+
+func TestMetaReader_CacheKeysIncludeReadSemantics(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+	typedData := &common.MetaData{
+		ClusterID: "cluster-cache",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  1000,
+		Metadata:  map[string]interface{}{"name": "typed"},
+	}
+	typedBytes, err := createCompressedTestData(typedData)
+	assert.NoError(t, err)
+	path := "metering/meta/logic/cluster-cache/1000.json.gz"
+	provider.files[path] = typedBytes
+
+	metaReader, err := NewMetaReader(provider, &config.Config{Logger: zap.NewNop()}, &Config{
+		Cache: &CacheConfig{Type: CacheTypeMemory, MaxSize: 1024 * 1024},
+	})
+	assert.NoError(t, err)
+	_, err = metaReader.ReadByType(context.Background(), "cluster-cache", common.MetaTypeLogic, 1500)
+	assert.NoError(t, err)
+
+	categorizedData := &common.MetaData{
+		ClusterID: "cluster-cache",
+		Type:      common.MetaTypeLogic,
+		Category:  "logic",
+		ModifyTS:  1000,
+		Metadata:  map[string]interface{}{"name": "categorized"},
+	}
+	categorizedBytes, err := createCompressedTestData(categorizedData)
+	assert.NoError(t, err)
+	provider.files[path] = categorizedBytes
+
+	result, err := metaReader.ReadWithCategory(context.Background(), "cluster-cache", "logic", 1500)
+	assert.NoError(t, err)
+	if assert.NotNil(t, result) {
+		assert.Equal(t, "logic", result.Category)
+		assert.Equal(t, "categorized", result.Metadata["name"])
+	}
+}
+
+func TestMetaReader_CachedMetadataIsIsolatedFromCallers(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+	compressed, err := createCompressedTestData(&common.MetaData{
+		ClusterID: "cluster-cache",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  1000,
+		Metadata: map[string]interface{}{
+			"owner":  "original-owner",
+			"labels": map[string]interface{}{"env": "production"},
+		},
+	})
+	assert.NoError(t, err)
+	provider.files["metering/meta/logic/cluster-cache/1000.json.gz"] = compressed
+
+	metaReader, err := NewMetaReader(provider, &config.Config{Logger: zap.NewNop()}, &Config{
+		Cache: &CacheConfig{Type: CacheTypeMemory, MaxSize: 1024 * 1024},
+	})
+	assert.NoError(t, err)
+	first, err := metaReader.ReadByType(context.Background(), "cluster-cache", common.MetaTypeLogic, 1500)
+	assert.NoError(t, err)
+	first.ClusterID = "foreign-cluster"
+	first.Metadata["owner"] = "modified-owner"
+	first.Metadata["labels"].(map[string]interface{})["env"] = "development"
+
+	second, err := metaReader.ReadByType(context.Background(), "cluster-cache", common.MetaTypeLogic, 1500)
+	assert.NoError(t, err)
+	if assert.NotNil(t, second) {
+		assert.NotSame(t, first, second)
+		assert.Equal(t, "cluster-cache", second.ClusterID)
+		assert.Equal(t, "original-owner", second.Metadata["owner"])
+		assert.Equal(t, "production", second.Metadata["labels"].(map[string]interface{})["env"])
+	}
+}
+
+func TestMetaReader_RejectsCachedForeignMetadata(t *testing.T) {
+	provider := newMockObjectStorageProvider()
+	compressed, err := createCompressedTestData(&common.MetaData{
+		ClusterID: "cluster-cache",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  1000,
+		Metadata:  map[string]interface{}{"owner": "requested-tenant"},
+	})
+	assert.NoError(t, err)
+	provider.files["metering/meta/logic/cluster-cache/1000.json.gz"] = compressed
+
+	metaReader, err := NewMetaReader(provider, &config.Config{Logger: zap.NewNop()}, &Config{
+		Cache: &CacheConfig{Type: CacheTypeMemory, MaxSize: 1024 * 1024},
+	})
+	assert.NoError(t, err)
+	_, err = metaReader.ReadByType(context.Background(), "cluster-cache", common.MetaTypeLogic, 1500)
+	assert.NoError(t, err)
+	keys := metaReader.cache.Keys()
+	if !assert.Len(t, keys, 1) {
+		return
+	}
+	err = metaReader.cache.Set(keys[0], &common.MetaData{
+		ClusterID: "foreign-cluster",
+		Type:      common.MetaTypeLogic,
+		ModifyTS:  1000,
+		Metadata:  map[string]interface{}{"owner": "foreign-tenant"},
+	})
+	assert.NoError(t, err)
+
+	result, err := metaReader.ReadByType(context.Background(), "cluster-cache", common.MetaTypeLogic, 1500)
+	assert.Nil(t, result)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "cached metadata ownership mismatch")
+	}
+}
+
+func TestMetaReader_RejectsInvalidTenantIdentifiers(t *testing.T) {
+	tests := []struct {
+		name        string
+		clusterID   string
+		category    string
+		expectedErr string
+	}{
+		{name: "empty cluster", clusterID: "", expectedErr: "cluster ID cannot be empty"},
+		{name: "cluster with slash", clusterID: "tenant/other", expectedErr: "cluster ID contains invalid characters"},
+		{name: "cluster with colon", clusterID: "tenant:other", expectedErr: "cluster ID contains invalid characters"},
+		{name: "category with slash", clusterID: "tenant", category: "tidb/other", expectedErr: "category contains invalid characters"},
+		{name: "category with colon", clusterID: "tenant", category: "tidb:other", expectedErr: "category contains invalid characters"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metaReader, err := NewMetaReader(newMockObjectStorageProvider(), &config.Config{Logger: zap.NewNop()}, nil)
+			assert.NoError(t, err)
+			result, err := metaReader.ReadWithCategory(context.Background(), tt.clusterID, tt.category, 1500)
+			assert.Nil(t, result)
+			if assert.Error(t, err) {
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestMetaReader_UsesFilenameModifyTimestamp(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		content map[string]interface{}
+		read    func(*MetaReader) (*common.MetaData, error)
+	}{
+		{
+			name: "legacy file without content timestamp",
+			path: "metering/meta/legacy-cluster/1000.json.gz",
+			content: map[string]interface{}{
+				"cluster_id": "legacy-cluster",
+				"metadata":   map[string]interface{}{"owner": "legacy-owner"},
+			},
+			read: func(r *MetaReader) (*common.MetaData, error) {
+				return r.Read(context.Background(), "legacy-cluster", 1500)
+			},
+		},
+		{
+			name: "legacy file with zero content timestamp",
+			path: "metering/meta/zero-cluster/1000.json.gz",
+			content: map[string]interface{}{
+				"cluster_id": "zero-cluster",
+				"modify_ts":  0,
+				"metadata":   map[string]interface{}{"owner": "zero-owner"},
+			},
+			read: func(r *MetaReader) (*common.MetaData, error) {
+				return r.Read(context.Background(), "zero-cluster", 1500)
+			},
+		},
+		{
+			name: "typed file with mismatched content timestamp",
+			path: "metering/meta/logic/typed-cluster/1000.json.gz",
+			content: map[string]interface{}{
+				"cluster_id": "typed-cluster",
+				"type":       "logic",
+				"modify_ts":  900,
+				"metadata":   map[string]interface{}{"owner": "typed-owner"},
+			},
+			read: func(r *MetaReader) (*common.MetaData, error) {
+				return r.ReadByType(context.Background(), "typed-cluster", common.MetaTypeLogic, 1500)
+			},
+		},
+		{
+			name: "categorized file with mismatched content timestamp",
+			path: "metering/meta/logic/tidb/categorized-cluster/1000.json.gz",
+			content: map[string]interface{}{
+				"cluster_id": "categorized-cluster",
+				"type":       "logic",
+				"category":   "tidb",
+				"modify_ts":  900,
+				"metadata":   map[string]interface{}{"owner": "categorized-owner"},
+			},
+			read: func(r *MetaReader) (*common.MetaData, error) {
+				return r.ReadByTypeWithCategory(context.Background(), "categorized-cluster", common.MetaTypeLogic, "tidb", 1500)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := newMockObjectStorageProvider()
+			compressed, err := createCompressedTestData(tt.content)
+			assert.NoError(t, err)
+			provider.files[tt.path] = compressed
+			metaReader, err := NewMetaReader(provider, &config.Config{Logger: zap.NewNop()}, nil)
+			assert.NoError(t, err)
+
+			result, err := tt.read(metaReader)
+			assert.NoError(t, err)
+			if assert.NotNil(t, result) {
+				assert.Equal(t, int64(1000), result.ModifyTS)
+			}
+		})
+	}
 }
