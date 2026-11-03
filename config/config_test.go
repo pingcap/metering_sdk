@@ -874,8 +874,8 @@ func TestNewFromURI_PathConstruction(t *testing.T) {
 	}
 }
 
-// TestToURI tests converting MeteringConfig to URI strings
-func TestToURI(t *testing.T) {
+// TestToURIWithCredentials tests converting MeteringConfig to credential-bearing URI strings
+func TestToURIWithCredentials(t *testing.T) {
 	tests := []struct {
 		name   string
 		config *MeteringConfig
@@ -989,14 +989,14 @@ func TestToURI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.ToURI()
+			got := tt.config.ToURIWithCredentials()
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-// TestToURI_RoundTrip tests that NewFromURI and ToURI are consistent
-func TestToURI_RoundTrip(t *testing.T) {
+// TestToURIWithCredentials_RoundTrip tests that NewFromURI and ToURIWithCredentials preserve configuration
+func TestToURIWithCredentials_RoundTrip(t *testing.T) {
 	testURIs := []string{
 		"s3://my-bucket/data?region-id=us-east-1",
 		"oss://oss-bucket/logs?region-id=oss-ap-southeast-1&access-key=test",
@@ -1012,7 +1012,7 @@ func TestToURI_RoundTrip(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Convert config back to URI
-			regeneratedURI := config.ToURI()
+			regeneratedURI := config.ToURIWithCredentials()
 
 			// Parse the regenerated URI again
 			configFromRegenerated, err := NewFromURI(regeneratedURI)
@@ -1136,4 +1136,139 @@ func TestToURI_RoundTripLocalFSEscapesBasePath(t *testing.T) {
 		assert.True(t, parsed.LocalFS.CreateDirs)
 		assert.Empty(t, parsed.LocalFS.Permissions)
 	}
+}
+
+func TestToURI_OmitsCredentials(t *testing.T) {
+	tests := []struct {
+		name            string
+		config          *MeteringConfig
+		secretValues    []string
+		requiredContent []string
+	}{
+		{
+			name: "AWS",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeS3,
+				AWS: &MeteringAWSConfig{
+					AccessKey:        "aws-access",
+					SecretAccessKey:  "aws-secret",
+					SessionToken:     "aws-token",
+					AssumeRoleARN:    "aws-role",
+					S3ForcePathStyle: true,
+				},
+			},
+			secretValues:    []string{"aws-access", "aws-secret", "aws-token"},
+			requiredContent: []string{"assume-role-arn=aws-role", "s3-force-path-style=true"},
+		},
+		{
+			name: "OSS",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeOSS,
+				OSS: &MeteringOSSConfig{
+					AccessKey:       "oss-access",
+					SecretAccessKey: "oss-secret",
+					SessionToken:    "oss-token",
+					AssumeRoleARN:   "oss-role",
+				},
+			},
+			secretValues:    []string{"oss-access", "oss-secret", "oss-token"},
+			requiredContent: []string{"assume-role-arn=oss-role"},
+		},
+		{
+			name: "COS",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeCOS,
+				COS: &MeteringCOSConfig{
+					AccessKey:       "cos-access",
+					SecretAccessKey: "cos-secret",
+					SessionToken:    "cos-token",
+					AssumeRoleARN:   "cos-role",
+				},
+			},
+			secretValues:    []string{"cos-access", "cos-secret", "cos-token"},
+			requiredContent: []string{"assume-role-arn=cos-role"},
+		},
+		{
+			name: "Azure",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeAzure,
+				Azure: &MeteringAzureConfig{
+					AccountName: "azure-account",
+					AccountKey:  "azure-key",
+					SASToken:    "azure-sas",
+				},
+			},
+			secretValues:    []string{"azure-key", "azure-sas"},
+			requiredContent: []string{"account-name=azure-account"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uri := tt.config.ToURI()
+			for _, value := range tt.secretValues {
+				assert.NotContains(t, uri, value)
+			}
+			for _, parameter := range []string{"access-key=", "secret-access-key=", "session-token=", "account-key=", "sas-token="} {
+				assert.NotContains(t, uri, parameter)
+			}
+			for _, content := range tt.requiredContent {
+				assert.Contains(t, uri, content)
+			}
+		})
+	}
+}
+
+func TestCredentialConfigsRedacted(t *testing.T) {
+	const masked = "***REDACTED***"
+
+	t.Run("AWS", func(t *testing.T) {
+		original := MeteringAWSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role", S3ForcePathStyle: true}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.True(t, redacted.S3ForcePathStyle)
+		assert.Equal(t, "access", original.AccessKey)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+		assert.Equal(t, "token", original.SessionToken)
+	})
+
+	t.Run("OSS", func(t *testing.T) {
+		original := MeteringOSSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role"}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+	})
+
+	t.Run("COS", func(t *testing.T) {
+		original := MeteringCOSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role"}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+	})
+
+	t.Run("Azure", func(t *testing.T) {
+		original := MeteringAzureConfig{AccountName: "account", AccountKey: "key", SASToken: "sas"}
+		redacted := original.Redacted()
+		assert.Equal(t, original.AccountName, redacted.AccountName)
+		assert.Equal(t, masked, redacted.AccountKey)
+		assert.Equal(t, masked, redacted.SASToken)
+		assert.Equal(t, "key", original.AccountKey)
+		assert.Equal(t, "sas", original.SASToken)
+	})
+
+	t.Run("empty secrets remain empty", func(t *testing.T) {
+		redacted := (MeteringAWSConfig{}).Redacted()
+		assert.Empty(t, redacted.AccessKey)
+		assert.Empty(t, redacted.SecretAccessKey)
+		assert.Empty(t, redacted.SessionToken)
+	})
 }
