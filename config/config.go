@@ -435,6 +435,7 @@ func (mc *MeteringConfig) WithCOSRoleARN(roleARN string) *MeteringConfig {
 //   - cos://my-bucket/logs?region-id=ap-beijing&assume-role-arn=qcs::cam::uin/123:roleName/metering
 //   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
+//   - localfs://./metering-data (relative LocalFS path)
 //
 // Supported schemes: s3, oss, cos, azure (alias: azblob), localfs, file
 // Common parameters: region-id/region, endpoint, shared-pool-id
@@ -471,7 +472,19 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 	if config.Type == storage.ProviderTypeLocalFS {
 		// For localfs, handle different path formats
 		var basePath string
-		if parsedURL.Host != "" {
+		if parsedURL.Host == "." {
+			switch parsedURL.Path {
+			case "":
+				basePath = "."
+			case "/":
+				basePath = "./"
+			default:
+				basePath = "." + parsedURL.Path
+				if strings.HasPrefix(basePath, "./../") {
+					basePath = strings.TrimPrefix(basePath, "./")
+				}
+			}
+		} else if parsedURL.Host != "" {
 			// For URI like "localfs://host/path", combine host and path
 			// Ensure proper path construction without double slashes
 			hostPath := "/" + parsedURL.Host
@@ -668,45 +681,36 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 //   - cos://my-bucket/logs?region-id=ap-beijing
 //   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
+//   - localfs://./metering-data (relative LocalFS path)
 func (mc *MeteringConfig) ToURI() string {
-	var uri strings.Builder
-	var params url.Values = make(url.Values)
+	uri := &url.URL{}
+	params := make(url.Values)
 
 	// Determine scheme based on provider type
 	switch mc.Type {
 	case storage.ProviderTypeS3:
-		uri.WriteString("s3://")
+		uri.Scheme = "s3"
 	case storage.ProviderTypeOSS:
-		uri.WriteString("oss://")
+		uri.Scheme = "oss"
 	case storage.ProviderTypeCOS:
-		uri.WriteString("cos://")
+		uri.Scheme = "cos"
 	case storage.ProviderTypeAzure:
-		uri.WriteString("azure://")
+		uri.Scheme = "azure"
 	case storage.ProviderTypeLocalFS:
-		uri.WriteString("localfs://")
+		uri.Scheme = "localfs"
 	default:
 		return ""
 	}
 
 	// Build host and path based on provider type
 	if mc.Type == storage.ProviderTypeLocalFS {
-		// For localfs, handle the base path properly
-		if mc.LocalFS != nil && mc.LocalFS.BasePath != "" {
-			// Remove any leading slash to avoid double slashes with scheme
-			basePath := strings.TrimPrefix(mc.LocalFS.BasePath, "/")
-			uri.WriteString("/")
-			uri.WriteString(basePath)
+		if mc.LocalFS != nil {
+			setLocalFSURIPath(uri, mc.LocalFS.BasePath)
 		}
 	} else {
-		// For cloud providers, host is bucket name
-		if mc.Bucket != "" {
-			uri.WriteString(mc.Bucket)
-		}
-
-		// Path is the prefix
+		uri.Host = mc.Bucket
 		if mc.Prefix != "" {
-			uri.WriteString("/")
-			uri.WriteString(mc.Prefix)
+			uri.Path = "/" + mc.Prefix
 		}
 	}
 
@@ -798,11 +802,32 @@ func (mc *MeteringConfig) ToURI() string {
 		}
 	}
 
-	// Add query parameters if any exist
 	if len(params) > 0 {
-		uri.WriteString("?")
-		uri.WriteString(params.Encode())
+		uri.RawQuery = params.Encode()
+	}
+	serialized := uri.String()
+	if uri.Host == "" && uri.Path == "" {
+		return uri.Scheme + "://" + strings.TrimPrefix(serialized, uri.Scheme+":")
+	}
+	return serialized
+}
+
+func setLocalFSURIPath(uri *url.URL, basePath string) {
+	if basePath == "" {
+		return
+	}
+	if strings.HasPrefix(basePath, "/") {
+		uri.Path = basePath
+		return
 	}
 
-	return uri.String()
+	uri.Host = "."
+	switch basePath {
+	case ".":
+		return
+	case "./":
+		uri.Path = "/"
+	default:
+		uri.Path = "/" + strings.TrimPrefix(basePath, "./")
+	}
 }

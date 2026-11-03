@@ -719,6 +719,12 @@ oss://[bucket]/[prefix]?region-id=[region]&access-key=[key]&secret-access-key=[s
 localfs:///[path]?create-dirs=[true|false]&permissions=[mode]
 ```
 
+### URI Serialization and LocalFS Paths
+
+`ToURI` escapes path components so characters such as `?` and `#` in a prefix or LocalFS base path remain path data and cannot create query parameters or fragments. Cloud bucket names must be valid URI host values; `NewFromURI` rejects invalid host encodings.
+
+Absolute LocalFS paths use `localfs:///data/storage`. Relative paths use a `./` marker, for example `localfs://./metering-data` for `./metering-data`. Relative paths without an explicit `./` prefix are normalized to the same form.
+
 ### URI Parameters
 
 - `region-id` / `region`: Region identifier for cloud providers (both parameter names supported)

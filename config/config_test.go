@@ -1055,3 +1055,85 @@ func TestToURI_RoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestToURI_RoundTripDoesNotInjectQuery(t *testing.T) {
+	original := &MeteringConfig{
+		Type:     storage.ProviderTypeS3,
+		Bucket:   "tenant-bucket",
+		Prefix:   "tenant?endpoint=http://evil.example.com&access-key=attacker&secret-access-key=attacker-secret&assume-role-arn=&",
+		Endpoint: "https://s3.example.com",
+		AWS: &MeteringAWSConfig{
+			AssumeRoleARN: "arn:aws:iam::123456789012:role/LegitimateRole",
+		},
+	}
+
+	uri := original.ToURI()
+	parsed, err := NewFromURI(uri)
+	assert.NoError(t, err)
+	if !assert.NotNil(t, parsed) {
+		return
+	}
+	assert.Equal(t, original.Bucket, parsed.Bucket)
+	assert.Equal(t, original.Prefix, parsed.Prefix)
+	assert.Equal(t, original.Endpoint, parsed.Endpoint)
+	if assert.NotNil(t, parsed.AWS) {
+		assert.Empty(t, parsed.AWS.AccessKey)
+		assert.Empty(t, parsed.AWS.SecretAccessKey)
+		assert.Equal(t, original.AWS.AssumeRoleARN, parsed.AWS.AssumeRoleARN)
+	}
+}
+
+func TestToURI_InvalidBucketCannotInjectQuery(t *testing.T) {
+	original := &MeteringConfig{
+		Type:     storage.ProviderTypeS3,
+		Bucket:   "tenant-bucket?endpoint=http://evil.example.com&access-key=attacker&secret-access-key=attacker-secret",
+		Endpoint: "https://s3.example.com",
+	}
+
+	uri := original.ToURI()
+	assert.NotContains(t, uri, "?endpoint=http://evil.example.com")
+	parsed, err := NewFromURI(uri)
+	assert.Error(t, err)
+	assert.Nil(t, parsed)
+}
+
+func TestToURI_RoundTripLocalFSRelativePaths(t *testing.T) {
+	tests := []struct {
+		name         string
+		basePath     string
+		wantURI      string
+		wantBasePath string
+	}{
+		{name: "current directory child", basePath: "./metering-data", wantURI: "localfs://./metering-data", wantBasePath: "./metering-data"},
+		{name: "implicit relative path", basePath: "metering-data", wantURI: "localfs://./metering-data", wantBasePath: "./metering-data"},
+		{name: "parent directory", basePath: "../metering-data", wantURI: "localfs://./../metering-data", wantBasePath: "../metering-data"},
+		{name: "current directory", basePath: ".", wantURI: "localfs://.", wantBasePath: "."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := NewMeteringConfig().WithLocalFS(tt.basePath)
+			uri := original.ToURI()
+			assert.Equal(t, tt.wantURI, uri)
+			parsed, err := NewFromURI(uri)
+			assert.NoError(t, err)
+			if assert.NotNil(t, parsed) && assert.NotNil(t, parsed.LocalFS) {
+				assert.Equal(t, tt.wantBasePath, parsed.LocalFS.BasePath)
+			}
+		})
+	}
+}
+
+func TestToURI_RoundTripLocalFSEscapesBasePath(t *testing.T) {
+	original := NewMeteringConfig().WithLocalFS("./data?permissions=0777&create-dirs=false")
+	uri := original.ToURI()
+	assert.Equal(t, "localfs://./data%3Fpermissions=0777&create-dirs=false", uri)
+
+	parsed, err := NewFromURI(uri)
+	assert.NoError(t, err)
+	if assert.NotNil(t, parsed) && assert.NotNil(t, parsed.LocalFS) {
+		assert.Equal(t, original.LocalFS.BasePath, parsed.LocalFS.BasePath)
+		assert.True(t, parsed.LocalFS.CreateDirs)
+		assert.Empty(t, parsed.LocalFS.Permissions)
+	}
+}
