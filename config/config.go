@@ -146,6 +146,16 @@ type MeteringCOSConfig struct {
 	SessionToken    string `yaml:"session-token,omitempty" toml:"session-token,omitempty" json:"session-token,omitempty" reloadable:"false"`
 }
 
+// MeteringTOSConfig Volcengine TOS specific configuration for high-level config.
+// AssumeRoleARN holds a Volcengine IAM role TRN; it is named ARN for
+// consistency with the other providers.
+type MeteringTOSConfig struct {
+	AssumeRoleARN   string `yaml:"assume-role-arn,omitempty" toml:"assume-role-arn,omitempty" json:"assume-role-arn,omitempty" reloadable:"false"`
+	AccessKey       string `yaml:"access-key,omitempty" toml:"access-key,omitempty" json:"access-key,omitempty" reloadable:"false"`
+	SecretAccessKey string `yaml:"secret-access-key,omitempty" toml:"secret-access-key,omitempty" json:"secret-access-key,omitempty" reloadable:"false"`
+	SessionToken    string `yaml:"session-token,omitempty" toml:"session-token,omitempty" json:"session-token,omitempty" reloadable:"false"`
+}
+
 // MeteringAzureConfig Azure Blob Storage specific configuration for high-level config
 type MeteringAzureConfig struct {
 	AccountName string `yaml:"account-name,omitempty" toml:"account-name,omitempty" json:"account-name,omitempty" reloadable:"false"`
@@ -185,6 +195,14 @@ func (c MeteringCOSConfig) Redacted() MeteringCOSConfig {
 }
 
 // Redacted returns a copy with credential fields masked for safe display.
+func (c MeteringTOSConfig) Redacted() MeteringTOSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
 func (c MeteringAzureConfig) Redacted() MeteringAzureConfig {
 	c.AccountKey = redactSecret(c.AccountKey)
 	c.SASToken = redactSecret(c.SASToken)
@@ -216,6 +234,7 @@ type MeteringConfig struct {
 	AWS     *MeteringAWSConfig     `yaml:"aws,omitempty" toml:"aws,omitempty" json:"aws,omitempty" reloadable:"false"`
 	OSS     *MeteringOSSConfig     `yaml:"oss,omitempty" toml:"oss,omitempty" json:"oss,omitempty" reloadable:"false"`
 	COS     *MeteringCOSConfig     `yaml:"cos,omitempty" toml:"cos,omitempty" json:"cos,omitempty" reloadable:"false"`
+	TOS     *MeteringTOSConfig     `yaml:"tos,omitempty" toml:"tos,omitempty" json:"tos,omitempty" reloadable:"false"`
 	Azure   *MeteringAzureConfig   `yaml:"azure,omitempty" toml:"azure,omitempty" json:"azure,omitempty" reloadable:"false"`
 	LocalFS *MeteringLocalFSConfig `yaml:"localfs,omitempty" toml:"localfs,omitempty" json:"localfs,omitempty" reloadable:"false"`
 
@@ -261,6 +280,15 @@ func (mc *MeteringConfig) ToProviderConfig() *storage.ProviderConfig {
 				AccessKey:       mc.COS.AccessKey,
 				SecretAccessKey: mc.COS.SecretAccessKey,
 				SessionToken:    mc.COS.SessionToken,
+			}
+		}
+	case storage.ProviderTypeTOS:
+		if mc.TOS != nil {
+			config.TOS = &storage.TOSConfig{
+				AssumeRoleARN:   mc.TOS.AssumeRoleARN,
+				AccessKey:       mc.TOS.AccessKey,
+				SecretAccessKey: mc.TOS.SecretAccessKey,
+				SessionToken:    mc.TOS.SessionToken,
 			}
 		}
 	case storage.ProviderTypeAzure:
@@ -349,6 +377,26 @@ func (mc *MeteringConfig) WithCOSAssumeRole(region, bucket, roleARN string) *Met
 	return mc
 }
 
+// WithTOS configures for Volcengine TOS storage
+func (mc *MeteringConfig) WithTOS(region, bucket string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeTOS
+	mc.Region = region
+	mc.Bucket = bucket
+	return mc
+}
+
+// WithTOSAssumeRole configures for Volcengine TOS storage with assume role
+func (mc *MeteringConfig) WithTOSAssumeRole(region, bucket, roleARN string) *MeteringConfig {
+	mc.Type = storage.ProviderTypeTOS
+	mc.Region = region
+	mc.Bucket = bucket
+	if mc.TOS == nil {
+		mc.TOS = &MeteringTOSConfig{}
+	}
+	mc.TOS.AssumeRoleARN = roleARN
+	return mc
+}
+
 // WithAzure configures for Azure Blob Storage
 func (mc *MeteringConfig) WithAzure(accountName, container string) *MeteringConfig {
 	mc.Type = storage.ProviderTypeAzure
@@ -400,6 +448,12 @@ func (mc *MeteringConfig) WithOSSConfig(ossConfig *MeteringOSSConfig) *MeteringC
 // WithCOSConfig sets COS specific configuration
 func (mc *MeteringConfig) WithCOSConfig(cosConfig *MeteringCOSConfig) *MeteringConfig {
 	mc.COS = cosConfig
+	return mc
+}
+
+// WithTOSConfig sets TOS specific configuration
+func (mc *MeteringConfig) WithTOSConfig(tosConfig *MeteringTOSConfig) *MeteringConfig {
+	mc.TOS = tosConfig
 	return mc
 }
 
@@ -465,6 +519,15 @@ func (mc *MeteringConfig) WithCOSRoleARN(roleARN string) *MeteringConfig {
 	return mc
 }
 
+// WithTOSRoleARN sets the Volcengine TOS role TRN for assume role
+func (mc *MeteringConfig) WithTOSRoleARN(roleARN string) *MeteringConfig {
+	if mc.TOS == nil {
+		mc.TOS = &MeteringTOSConfig{}
+	}
+	mc.TOS.AssumeRoleARN = roleARN
+	return mc
+}
+
 // NewFromURI creates a new MeteringConfig from a URI string.
 // Credential-bearing URIs are sensitive and must not be logged or passed through insecure channels.
 // URI format: [scheme]://[bucket]/[prefix]?[parameters]
@@ -472,15 +535,17 @@ func (mc *MeteringConfig) WithCOSRoleARN(roleARN string) *MeteringConfig {
 //   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
 //   - oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=AKSKEXAMPLE
 //   - cos://my-bucket/logs?region-id=ap-beijing&assume-role-arn=qcs::cam::uin/123:roleName/metering
+//   - tos://my-bucket/logs?region-id=cn-beijing&assume-role-arn=trn:iam::1:role/metering
 //   - azure://my-container/prefix?account-name=acct&account-key=key&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
 //   - localfs://./metering-data (relative LocalFS path)
 //
-// Supported schemes: s3, oss, cos, azure (alias: azblob), localfs, file
+// Supported schemes: s3, oss, cos, tos, azure (alias: azblob), localfs, file
 // Common parameters: region-id/region, endpoint, shared-pool-id
 // AWS/S3 parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn, s3-force-path-style/force-path-style
 // OSS parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn
 // COS parameters: access-key, secret-access-key, session-token, assume-role-arn/role-arn
+// TOS parameters: access-key, secret-access-key, session-token, assume-role-arn/assume-role-trn/role-arn
 // Azure parameters: account-name, account-key, sas-token
 // LocalFS parameters: create-dirs, permissions
 func NewFromURI(uriStr string) (*MeteringConfig, error) {
@@ -499,6 +564,8 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 		config.Type = storage.ProviderTypeOSS
 	case "cos":
 		config.Type = storage.ProviderTypeCOS
+	case "tos":
+		config.Type = storage.ProviderTypeTOS
 	case "azure", "azblob":
 		config.Type = storage.ProviderTypeAzure
 	case "localfs", "file":
@@ -675,6 +742,38 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 			config.COS = cosConfig
 		}
 
+	case storage.ProviderTypeTOS:
+		tosConfig := &MeteringTOSConfig{}
+		hasTOSConfig := false
+
+		if accessKey := queryParams.Get("access-key"); accessKey != "" {
+			tosConfig.AccessKey = accessKey
+			hasTOSConfig = true
+		}
+		if secretKey := queryParams.Get("secret-access-key"); secretKey != "" {
+			tosConfig.SecretAccessKey = secretKey
+			hasTOSConfig = true
+		}
+		if sessionToken := queryParams.Get("session-token"); sessionToken != "" {
+			tosConfig.SessionToken = sessionToken
+			hasTOSConfig = true
+		}
+		roleARN := queryParams.Get("assume-role-arn")
+		if roleARN == "" {
+			roleARN = queryParams.Get("assume-role-trn")
+		}
+		if roleARN == "" {
+			roleARN = queryParams.Get("role-arn")
+		}
+		if roleARN != "" {
+			tosConfig.AssumeRoleARN = roleARN
+			hasTOSConfig = true
+		}
+
+		if hasTOSConfig {
+			config.TOS = tosConfig
+		}
+
 	case storage.ProviderTypeAzure:
 		azureConfig := &MeteringAzureConfig{}
 		hasAzureConfig := false
@@ -719,6 +818,7 @@ func NewFromURI(uriStr string) (*MeteringConfig, error) {
 //   - s3://my-bucket/data?region-id=us-east-1&endpoint=https://s3.example.com
 //   - oss://my-bucket/logs?region-id=oss-ap-southeast-1
 //   - cos://my-bucket/logs?region-id=ap-beijing
+//   - tos://my-bucket/logs?region-id=cn-beijing
 //   - azure://my-container/prefix?account-name=acct&endpoint=https://acct.blob.core.windows.net
 //   - localfs:///data/storage/logs?create-dirs=true&permissions=0755
 //   - localfs://./metering-data (relative LocalFS path)
@@ -744,6 +844,8 @@ func (mc *MeteringConfig) toURI(includeCredentials bool) string {
 		uri.Scheme = "oss"
 	case storage.ProviderTypeCOS:
 		uri.Scheme = "cos"
+	case storage.ProviderTypeTOS:
+		uri.Scheme = "tos"
 	case storage.ProviderTypeAzure:
 		uri.Scheme = "azure"
 	case storage.ProviderTypeLocalFS:
@@ -825,6 +927,22 @@ func (mc *MeteringConfig) toURI(includeCredentials bool) string {
 			}
 			if mc.COS.AssumeRoleARN != "" {
 				params.Set("assume-role-arn", mc.COS.AssumeRoleARN)
+			}
+		}
+
+	case storage.ProviderTypeTOS:
+		if mc.TOS != nil {
+			if includeCredentials && mc.TOS.AccessKey != "" {
+				params.Set("access-key", mc.TOS.AccessKey)
+			}
+			if includeCredentials && mc.TOS.SecretAccessKey != "" {
+				params.Set("secret-access-key", mc.TOS.SecretAccessKey)
+			}
+			if includeCredentials && mc.TOS.SessionToken != "" {
+				params.Set("session-token", mc.TOS.SessionToken)
+			}
+			if mc.TOS.AssumeRoleARN != "" {
+				params.Set("assume-role-arn", mc.TOS.AssumeRoleARN)
 			}
 		}
 
