@@ -245,30 +245,34 @@ func volcengineOIDCEnv() (tokenFile, roleTRN string, err error) {
 type tosCredentialsAdapter struct {
 	provider volcengineTOSCredentialProvider
 
-	mu      sync.Mutex
-	lastErr error
+	mu       sync.Mutex
+	resolved volcengineTOSCredential
 }
 
-// resolve makes a usable credential available under the request context.
-// Every object operation calls it first, so that waiting for STS honors the
-// caller's deadline and Credential, which has no context, finds the cache warm.
+// resolve obtains a credential under the request context. Every object
+// operation calls it first: waiting for STS happens only here, bounded by the
+// caller's deadline, never in Credential.
 func (c *tosCredentialsAdapter) resolve(ctx context.Context) error {
-	if _, err := c.provider.GetCredential(ctx); err != nil {
+	cred, err := c.provider.GetCredential(ctx)
+	if err != nil {
 		return fmt.Errorf("resolve TOS credentials: %w", err)
 	}
+	c.mu.Lock()
+	c.resolved = cred
+	c.mu.Unlock()
 	return nil
 }
 
 // Credential implements vtos.Credentials, which takes no context and cannot
-// return an error. It resolves again only if the credential was lost since
-// resolve (expiry, or an SDK retry signing later); a failure then yields an
-// empty Credential and records the error for tosCredentialGuardTransport.
+// return an error. The SDK calls it again for every retry, so it only reads the
+// resolved credential. One that expired since resolve yields an empty
+// Credential, which tosCredentialGuardTransport rejects.
 func (c *tosCredentialsAdapter) Credential() vtos.Credential {
-	cred, err := c.provider.GetCredential(context.Background())
-	if err != nil {
-		c.mu.Lock()
-		c.lastErr = err
-		c.mu.Unlock()
+	c.mu.Lock()
+	cred := c.resolved
+	c.mu.Unlock()
+	// A zero expiresAt is a static key, which never expires.
+	if cred.accessKey == "" || (!cred.expiresAt.IsZero() && !time.Now().Before(cred.expiresAt)) {
 		return vtos.Credential{}
 	}
 	return vtos.Credential{
@@ -278,29 +282,20 @@ func (c *tosCredentialsAdapter) Credential() vtos.Credential {
 	}
 }
 
-func (c *tosCredentialsAdapter) lastResolveError() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.lastErr
-}
-
 // Authorization prefix the TOS SDK emits when it signs with an empty AccessKeyID.
 const tosSigV4EmptyAccessKeyPrefix = "TOS4-HMAC-SHA256 Credential=/"
 
+var errTOSCredentialExpired = errors.New("resolve TOS credentials: credential expired before the request was signed")
+
 // tosCredentialGuardTransport fails a request the SDK signed with an empty
-// AccessKeyID (credential resolution failed) instead of sending it for a 403.
+// AccessKeyID instead of sending it for a 403.
 type tosCredentialGuardTransport struct {
-	creds *tosCredentialsAdapter
-	next  vtos.Transport
+	next vtos.Transport
 }
 
 func (t *tosCredentialGuardTransport) RoundTrip(ctx context.Context, req *vtos.Request) (*vtos.Response, error) {
 	if strings.HasPrefix(req.Header.Get("Authorization"), tosSigV4EmptyAccessKeyPrefix) {
-		err := t.creds.lastResolveError()
-		if err == nil {
-			err = errors.New("credentials unresolved")
-		}
-		return nil, fmt.Errorf("resolve TOS credentials: %w", err)
+		return nil, errTOSCredentialExpired
 	}
 	return t.next.RoundTrip(ctx, req)
 }

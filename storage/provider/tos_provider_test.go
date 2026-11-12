@@ -310,9 +310,9 @@ func (f tosCredentialProviderFunc) GetCredential(ctx context.Context) (volcengin
 	return f(ctx)
 }
 
-func TestTOSCredentialGuardFailsRequestSignedWithoutCredential(t *testing.T) {
-	// Real TOS SDK signer and guard. The credential is there when the operation
-	// resolves it and gone when the SDK signs, as when it expires in between.
+func TestTOSCredentialExpiredBeforeSigningFailsWithoutWaiting(t *testing.T) {
+	// Real TOS SDK signer and guard. The resolved credential has expired by the
+	// time the SDK signs; signing must not wait on the provider for a new one.
 	next := &recordingTOSTransport{}
 	provider, err := newTOSProvider(&ProviderConfig{
 		Type:   ProviderTypeTOS,
@@ -322,18 +322,20 @@ func TestTOSCredentialGuardFailsRequestSignedWithoutCredential(t *testing.T) {
 	}, &fakeVolcengineSTS{}, next)
 	require.NoError(t, err)
 
-	stsErr := errors.New("STS unavailable")
-	calls := 0
-	provider.credentials.provider = tosCredentialProviderFunc(func(context.Context) (volcengineTOSCredential, error) {
-		calls++
-		if calls == 1 {
-			return stsCredential("tmp", time.Hour), nil
+	var calls atomic.Int32
+	provider.credentials.provider = tosCredentialProviderFunc(func(ctx context.Context) (volcengineTOSCredential, error) {
+		if calls.Add(1) == 1 {
+			return stsCredential("tmp", -time.Second), nil
 		}
-		return volcengineTOSCredential{}, stsErr
+		<-ctx.Done()
+		return volcengineTOSCredential{}, ctx.Err()
 	})
 
-	_, err = provider.Exists(context.Background(), "metering/ru/1.json.gz")
-	require.ErrorIs(t, err, stsErr)
-	require.ErrorContains(t, err, "resolve TOS credentials")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = provider.Exists(ctx, "metering/ru/1.json.gz")
+	require.ErrorIs(t, err, errTOSCredentialExpired)
+	require.NoError(t, ctx.Err(), "signing waited on the provider")
+	require.Equal(t, int32(1), calls.Load())
 	require.Zero(t, next.calls, "unsigned request must not reach the network")
 }

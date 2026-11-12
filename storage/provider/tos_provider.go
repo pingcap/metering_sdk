@@ -55,7 +55,7 @@ func newTOSProvider(providerConfig *ProviderConfig, sts volcengineSTSClient, nex
 		vtos.WithCredentials(credentials),
 		// Deprecated, but the only hook that sees the signed request while
 		// keeping the SDK's default transport; WithHTTPTransport drops the latter.
-		vtos.WithTransport(&tosCredentialGuardTransport{creds: credentials, next: next}),
+		vtos.WithTransport(&tosCredentialGuardTransport{next: next}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create TOS client: %w", err)
