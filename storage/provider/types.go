@@ -14,6 +14,8 @@ const (
 	ProviderTypeOSS ProviderType = "oss"
 	// ProviderTypeCOS TencentCloud COS storage provider
 	ProviderTypeCOS ProviderType = "cos"
+	// ProviderTypeTOS Volcengine TOS storage provider
+	ProviderTypeTOS ProviderType = "tos"
 	// ProviderTypeLocalFS local filesystem storage provider
 	ProviderTypeLocalFS ProviderType = "localfs"
 )
@@ -32,6 +34,7 @@ type ProviderConfig struct {
 	Azure   *AzureConfig   `json:"azure,omitempty"`   // Azure Blob Storage specific configuration
 	OSS     *OSSConfig     `json:"oss,omitempty"`     // Alibaba Cloud OSS specific configuration
 	COS     *COSConfig     `json:"cos,omitempty"`     // TencentCloud COS specific configuration
+	TOS     *TOSConfig     `json:"tos,omitempty"`     // Volcengine TOS specific configuration
 	LocalFS *LocalFSConfig `json:"localfs,omitempty"` // local filesystem specific configuration
 }
 
@@ -77,6 +80,16 @@ type COSConfig struct {
 	SessionToken    string `json:"session_token,omitempty"`
 }
 
+// TOSConfig Volcengine TOS specific configuration.
+// AssumeRoleARN holds a Volcengine IAM role TRN; it is named ARN for
+// consistency with the other providers.
+type TOSConfig struct {
+	AssumeRoleARN   string `json:"assume_role_arn,omitempty"`
+	AccessKey       string `json:"access_key,omitempty"`
+	SecretAccessKey string `json:"secret_access_key,omitempty"`
+	SessionToken    string `json:"session_token,omitempty"`
+}
+
 func redactSecret(secret string) string {
 	if secret == "" {
 		return ""
@@ -102,6 +115,14 @@ func (c OSSConfig) Redacted() OSSConfig {
 
 // Redacted returns a copy with credential fields masked for safe display.
 func (c COSConfig) Redacted() COSConfig {
+	c.AccessKey = redactSecret(c.AccessKey)
+	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
+	c.SessionToken = redactSecret(c.SessionToken)
+	return c
+}
+
+// Redacted returns a copy with credential fields masked for safe display.
+func (c TOSConfig) Redacted() TOSConfig {
 	c.AccessKey = redactSecret(c.AccessKey)
 	c.SecretAccessKey = redactSecret(c.SecretAccessKey)
 	c.SessionToken = redactSecret(c.SessionToken)

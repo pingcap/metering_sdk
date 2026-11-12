@@ -40,6 +40,16 @@ func TestCredentialConfigsRedacted(t *testing.T) {
 		assert.Equal(t, "secret", original.SecretAccessKey)
 	})
 
+	t.Run("TOS", func(t *testing.T) {
+		original := TOSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role"}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+	})
+
 	t.Run("Azure", func(t *testing.T) {
 		original := AzureConfig{AccountName: "account", AccountKey: "key", SASToken: "sas"}
 		redacted := original.Redacted()
