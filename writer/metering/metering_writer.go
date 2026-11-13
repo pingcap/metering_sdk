@@ -100,6 +100,15 @@ func (w *MeteringWriter) Write(ctx context.Context, data interface{}) error {
 		return fmt.Errorf("SharedPoolID is required and cannot be empty")
 	}
 
+	// Validate key segments so attacker-influenced values cannot escape or relocate
+	// the object key (path traversal / cross-tenant key placement).
+	if err := utils.ValidateSharedPoolID(meteringData.SharedPoolID); err != nil {
+		return err
+	}
+	if err := utils.ValidateCategory(meteringData.Category); err != nil {
+		return err
+	}
+
 	// Validate IDs do not contain hyphens
 	if err := utils.ValidateSelfID(meteringData.SelfID); err != nil {
 		return err
