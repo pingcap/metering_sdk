@@ -74,8 +74,10 @@ func parseFileMode(perm string) (fs.FileMode, error) {
 	return 0755, fmt.Errorf("unsupported permission format: %s", perm)
 }
 
-// buildPath builds the complete path with prefix
-func (l *LocalFSProvider) buildPath(path string) string {
+// buildPath builds the complete path with prefix and guarantees the result stays
+// within basePath, so ".." (or separator) segments in a key cannot escape the
+// storage root into arbitrary local files.
+func (l *LocalFSProvider) buildPath(path string) (string, error) {
 	// Combine prefix and path
 	if l.prefix != "" {
 		// Ensure proper separator between prefix and path
@@ -85,12 +87,24 @@ func (l *LocalFSProvider) buildPath(path string) string {
 	}
 
 	// Combine base path and final path
-	return filepath.Join(l.basePath, path)
+	fullPath := filepath.Join(l.basePath, path)
+
+	// Containment check: the cleaned result must remain inside basePath.
+	base := filepath.Clean(l.basePath)
+	rel, err := filepath.Rel(base, fullPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("resolved path escapes base directory: %s", path)
+	}
+
+	return fullPath, nil
 }
 
 // Upload implements ObjectStorageProvider interface
 func (l *LocalFSProvider) Upload(ctx context.Context, path string, data io.Reader) error {
-	fullPath := l.buildPath(path)
+	fullPath, err := l.buildPath(path)
+	if err != nil {
+		return err
+	}
 
 	// Ensure directory exists
 	dir := filepath.Dir(fullPath)
@@ -123,7 +137,10 @@ func (l *LocalFSProvider) Upload(ctx context.Context, path string, data io.Reade
 
 // Download implements ObjectStorageProvider interface
 func (l *LocalFSProvider) Download(ctx context.Context, path string) (io.ReadCloser, error) {
-	fullPath := l.buildPath(path)
+	fullPath, err := l.buildPath(path)
+	if err != nil {
+		return nil, err
+	}
 
 	file, err := os.Open(fullPath)
 	if err != nil {
@@ -138,7 +155,10 @@ func (l *LocalFSProvider) Download(ctx context.Context, path string) (io.ReadClo
 
 // Delete implements ObjectStorageProvider interface
 func (l *LocalFSProvider) Delete(ctx context.Context, path string) error {
-	fullPath := l.buildPath(path)
+	fullPath, err := l.buildPath(path)
+	if err != nil {
+		return err
+	}
 
 	if err := os.Remove(fullPath); err != nil {
 		if os.IsNotExist(err) {
@@ -152,9 +172,12 @@ func (l *LocalFSProvider) Delete(ctx context.Context, path string) error {
 
 // Exists implements ObjectStorageProvider interface
 func (l *LocalFSProvider) Exists(ctx context.Context, path string) (bool, error) {
-	fullPath := l.buildPath(path)
+	fullPath, err := l.buildPath(path)
+	if err != nil {
+		return false, err
+	}
 
-	_, err := os.Stat(fullPath)
+	_, err = os.Stat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
