@@ -1189,6 +1189,20 @@ func TestToURI_OmitsCredentials(t *testing.T) {
 			requiredContent: []string{"assume-role-arn=cos-role"},
 		},
 		{
+			name: "TOS",
+			config: &MeteringConfig{
+				Type: storage.ProviderTypeTOS,
+				TOS: &MeteringTOSConfig{
+					AccessKey:       "tos-access",
+					SecretAccessKey: "tos-secret",
+					SessionToken:    "tos-token",
+					AssumeRoleARN:   "tos-role",
+				},
+			},
+			secretValues:    []string{"tos-access", "tos-secret", "tos-token"},
+			requiredContent: []string{"assume-role-arn=tos-role"},
+		},
+		{
 			name: "Azure",
 			config: &MeteringConfig{
 				Type: storage.ProviderTypeAzure,
@@ -1247,6 +1261,16 @@ func TestCredentialConfigsRedacted(t *testing.T) {
 
 	t.Run("COS", func(t *testing.T) {
 		original := MeteringCOSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role"}
+		redacted := original.Redacted()
+		assert.Equal(t, masked, redacted.AccessKey)
+		assert.Equal(t, masked, redacted.SecretAccessKey)
+		assert.Equal(t, masked, redacted.SessionToken)
+		assert.Equal(t, original.AssumeRoleARN, redacted.AssumeRoleARN)
+		assert.Equal(t, "secret", original.SecretAccessKey)
+	})
+
+	t.Run("TOS", func(t *testing.T) {
+		original := MeteringTOSConfig{AccessKey: "access", SecretAccessKey: "secret", SessionToken: "token", AssumeRoleARN: "role"}
 		redacted := original.Redacted()
 		assert.Equal(t, masked, redacted.AccessKey)
 		assert.Equal(t, masked, redacted.SecretAccessKey)

@@ -4,7 +4,7 @@ A Go SDK for writing and reading metering data to various storage backends inclu
 
 ## Features
 
-- **Multiple Storage Backends**: Support for local filesystem, AWS S3, and Alibaba Cloud OSS
+- **Multiple Storage Backends**: Support for local filesystem, AWS S3, Alibaba Cloud OSS, and Volcengine TOS
 - **Shared Pool Support**: Mandatory SharedPoolID for organizing metering data across different pools
 - **URI Configuration**: Simple URI-based configuration for all storage providers
 - **Data Types**: Write both metering data and metadata
@@ -12,7 +12,7 @@ A Go SDK for writing and reading metering data to various storage backends inclu
 - **Compression**: Built-in gzip compression
 - **Validation**: Comprehensive data validation including SharedPoolID requirements
 - **Concurrency Safe**: Thread-safe operations
-- **AssumeRole Support**: AWS and Alibaba Cloud role assumption for enhanced security
+- **AssumeRole Support**: AWS, Alibaba Cloud, and Volcengine role assumption for enhanced security
 
 ## Installation
 
@@ -714,6 +714,13 @@ s3://[bucket]/[prefix]?region-id=[region]&endpoint=[endpoint]&access-key=[key]&s
 oss://[bucket]/[prefix]?region-id=[region]&access-key=[key]&secret-access-key=[secret]&role-arn=[arn]&...
 ```
 
+#### TOS (Volcengine Object Storage)
+```
+tos://[bucket]/[prefix]?region-id=[region]&endpoint=[endpoint]&access-key=[key]&secret-access-key=[secret]&assume-role-arn=[trn]&...
+```
+
+`region-id` is required even when `endpoint` is set, because it is the SigV4 signing region. Without `endpoint`, the SDK uses the VPC endpoint `tos-[region].ivolces.com`; outside a Volcengine VPC, set `endpoint` to the public endpoint, for example `https://tos-cn-beijing.volces.com`.
+
 #### LocalFS (Local File System)
 ```
 localfs:///[path]?create-dirs=[true|false]&permissions=[mode]
@@ -734,7 +741,7 @@ Absolute LocalFS paths use `localfs:///data/storage`. Relative paths use a `./` 
 - `region-id` / `region`: Region identifier for cloud providers (both parameter names supported)
 - `endpoint`: Custom endpoint URL for S3-compatible services
 - `access-key`, `secret-access-key`, `session-token`: Credentials
-- `assume-role-arn` / `role-arn`: Role ARN for assume role authentication (alias support)
+- `assume-role-arn` / `role-arn`: Role ARN for assume role authentication (alias support); TOS also accepts `assume-role-trn`
 - `shared-pool-id`: Shared pool cluster ID
 - `s3-force-path-style` / `force-path-style`: Force path-style requests for S3 (both parameter names supported)
 - `create-dirs`: Create directories if they don't exist (LocalFS only)
@@ -806,6 +813,9 @@ s3URI := "s3://my-bucket/data?region-id=us-east-1&access-key=AKIAIOSFODNN7EXAMPL
 
 // OSS with credentials and assume role
 ossURI := "oss://my-bucket/logs?region-id=oss-ap-southeast-1&access-key=LTAI5tExample&secret-access-key=ExampleSecretKey&role-arn=acs:ram::123456789012:role/TestRole"
+
+// TOS with credentials and assume role
+tosURI := "tos://my-bucket/logs?region-id=cn-beijing&access-key=AKLTExample&secret-access-key=ExampleSecretKey&assume-role-arn=trn:iam::2100000000:role/MeteringRole"
 
 // LocalFS with permissions
 localURI := "localfs:///tmp/metering-data?create-dirs=true&permissions=0755"
@@ -892,6 +902,12 @@ func main() {
 
 // OSS with assume role (using alias)
 "oss://my-oss-bucket/logs?region-id=oss-cn-hangzhou&role-arn=acs:ram::123456789012:role/TestRole"
+
+// TOS in a Volcengine VPC, using VKE OIDC or VOLCSTACK_* credentials
+"tos://my-tos-bucket/data?region-id=cn-beijing"
+
+// TOS outside a VPC, with assume role
+"tos://my-tos-bucket/logs?region-id=cn-beijing&endpoint=https://tos-cn-beijing.volces.com&assume-role-arn=trn:iam::2100000000:role/MeteringRole"
 
 // LocalFS with auto-create directories
 "localfs:///data/metering?create-dirs=true&permissions=0755"
@@ -1297,6 +1313,18 @@ func main() {
   - For ACK deployment: set `CustomConfig` to `nil` and only use `AssumeRoleARN`
   - For local development: use both `CustomConfig` and `AssumeRoleARN`
 
+#### Volcengine TOS AssumeRole
+
+- **Role TRN Format**: `trn:iam::ACCOUNT-ID:role/ROLE-NAME`, set in `AssumeRoleARN` (named ARN for consistency with the other providers)
+- **Base Credentials**, in this order:
+  1. `AccessKey` and `SecretAccessKey` (and optional `SessionToken`) in `TOSConfig`
+  2. `VOLCSTACK_ACCESS_KEY_ID` and `VOLCSTACK_SECRET_ACCESS_KEY` (and optional `VOLCSTACK_SESSION_TOKEN`)
+  3. VKE OIDC: `VOLCENGINE_OIDC_TOKEN_FILE` and `VOLCENGINE_OIDC_ROLE_TRN`
+- **Prerequisites**:
+  - The base identity must be allowed to assume the target role
+  - The role's maximum session duration must be at least 3600 seconds (the default)
+- Credentials are resolved on the first request, not when the provider is created, so a process can start before its identity is in place. Temporary credentials are refreshed shortly before they expire, without blocking requests while the current credential is still valid.
+
 ### Environment-Specific Configuration
 
 #### Local Development
@@ -1361,6 +1389,23 @@ ossConfig := &storage.ProviderConfig{
     },
 }
 ```
+
+#### TOS Configuration
+
+```go
+tosConfig := &storage.ProviderConfig{
+    Type:     storage.ProviderTypeTOS,
+    Bucket:   "your-bucket-name",
+    Region:   "cn-beijing",                        // Required, also when Endpoint is set
+    Prefix:   "optional-prefix",
+    Endpoint: "https://tos-cn-beijing.volces.com", // Optional, defaults to tos-<region>.ivolces.com
+    TOS: &storage.TOSConfig{
+        AssumeRoleARN: "trn:iam::2100000000:role/YourRole", // Optional assume role TRN
+    },
+}
+```
+
+With the high-level configuration, use `config.NewMeteringConfig().WithTOS(region, bucket)` or `WithTOSAssumeRole(region, bucket, roleTRN)`. In YAML, JSON, and TOML, TOS settings live under the `tos` key with `assume-role-arn`, `access-key`, `secret-access-key`, and `session-token`.
 
 #### Local Filesystem Configuration
 

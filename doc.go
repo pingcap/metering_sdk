@@ -1,7 +1,8 @@
 // Package sdk is the official Metering SDK for the Go programming language.
 //
 // metering_sdk is a SDK for writing and reading metering data to various storage backends
-// including local filesystem and AWS S3.
+// including local filesystem, AWS S3, Alibaba Cloud OSS, TencentCloud COS, Volcengine TOS,
+// and Azure Blob Storage.
 //
 // # Getting started
 //
@@ -71,6 +72,29 @@
 //
 //	    fmt.Println("Metering data written successfully!")
 //	}
+//
+// # Configuring Storage from a URI
+//
+// A storage provider can also be configured from a URI. This example uses
+// Volcengine TOS with an assumed role.
+//
+//	meteringConfig, err := config.NewFromURI(
+//	    "tos://your-bucket-name/metering-data?region-id=cn-beijing" +
+//	        "&assume-role-arn=trn:iam::2100000000:role/MeteringRole")
+//	if err != nil {
+//	    log.Fatalf("Failed to parse URI: %v", err)
+//	}
+//	provider, err := storage.NewObjectStorageProvider(meteringConfig.ToProviderConfig())
+//	if err != nil {
+//	    log.Fatalf("Failed to create storage provider: %v", err)
+//	}
+//
+// TOS requires region-id even when endpoint is set. Without endpoint it uses the
+// VPC endpoint tos-<region>.ivolces.com; outside a Volcengine VPC, add for example
+// endpoint=https://tos-cn-beijing.volces.com. Base credentials come from
+// access-key and secret-access-key, then VOLCSTACK_ACCESS_KEY_ID and
+// VOLCSTACK_SECRET_ACCESS_KEY, then VKE OIDC (VOLCENGINE_OIDC_TOKEN_FILE and
+// VOLCENGINE_OIDC_ROLE_TRN), and are resolved on the first request.
 //
 // # Reading Metering Data
 //
