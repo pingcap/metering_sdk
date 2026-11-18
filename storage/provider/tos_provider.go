@@ -48,6 +48,9 @@ func newTOSProvider(providerConfig *ProviderConfig, sts volcengineSTSClient, nex
 
 	if next == nil {
 		transportConfig := vtos.DefaultTransportConfig()
+		// A DNS cache starts a refresh goroutine that only ClientV2.Close stops,
+		// and Close cannot see the transport behind the guard below.
+		transportConfig.DNSCacheTime = 0
 		next = vtos.NewDefaultTransport(&transportConfig)
 	}
 	client, err := vtos.NewClientV2(buildTOSEndpoint(region, providerConfig.Endpoint),

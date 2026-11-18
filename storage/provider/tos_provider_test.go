@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -87,6 +88,17 @@ func TestNewTOSProviderRejectsInvalidConfig(t *testing.T) {
 			require.ErrorContains(t, err, tt.want)
 		})
 	}
+}
+
+func TestNewTOSProviderStartsNoBackgroundGoroutines(t *testing.T) {
+	cfg := &ProviderConfig{Type: ProviderTypeTOS, Bucket: testTOSBucket, Region: testTOSRegion, TOS: &TOSConfig{AccessKey: "ak", SecretAccessKey: "sk"}}
+	before := runtime.NumGoroutine()
+	for i := 0; i < 12; i++ {
+		_, err := NewTOSProvider(cfg)
+		require.NoError(t, err)
+	}
+	// Providers have no Close, so any goroutine they start outlives them.
+	require.Less(t, runtime.NumGoroutine()-before, 12)
 }
 
 func TestNewTOSProviderWithoutIdentityFailsOnFirstRequest(t *testing.T) {
