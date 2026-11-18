@@ -27,8 +27,8 @@ func ValidateCategory(category string) error {
 		return fmt.Errorf("category cannot be empty")
 	}
 
-	// Check for invalid characters
-	if strings.ContainsAny(category, "/\\:*?\"<>|") {
+	// Check for invalid characters and path-traversal sequences
+	if strings.ContainsAny(category, "/\\:*?\"<>|") || strings.Contains(category, "..") {
 		return fmt.Errorf("category contains invalid characters")
 	}
 
@@ -41,8 +41,8 @@ func ValidateClusterID(clusterID string) error {
 		return fmt.Errorf("cluster ID cannot be empty")
 	}
 
-	// Check for invalid characters
-	if strings.ContainsAny(clusterID, "/\\:*?\"<>|") {
+	// Check for invalid characters and path-traversal sequences
+	if strings.ContainsAny(clusterID, "/\\:*?\"<>|") || strings.Contains(clusterID, "..") {
 		return fmt.Errorf("cluster ID contains invalid characters")
 	}
 
@@ -57,6 +57,26 @@ func ValidateSelfID(selfID string) error {
 
 	if strings.Contains(selfID, "-") {
 		return fmt.Errorf("self_id cannot contain dash character: %s", selfID)
+	}
+
+	// Reject separators and path-traversal sequences so the id cannot escape or
+	// relocate its intended key when interpolated into a storage path.
+	if strings.ContainsAny(selfID, "/\\:*?\"<>|") || strings.Contains(selfID, "..") {
+		return fmt.Errorf("self_id contains invalid characters: %s", selfID)
+	}
+
+	return nil
+}
+
+// ValidateSharedPoolID validates shared pool ID used as a storage key segment
+func ValidateSharedPoolID(sharedPoolID string) error {
+	if sharedPoolID == "" {
+		return fmt.Errorf("shared pool ID cannot be empty")
+	}
+
+	// Check for invalid characters and path-traversal sequences
+	if strings.ContainsAny(sharedPoolID, "/\\:*?\"<>|") || strings.Contains(sharedPoolID, "..") {
+		return fmt.Errorf("shared pool ID contains invalid characters")
 	}
 
 	return nil

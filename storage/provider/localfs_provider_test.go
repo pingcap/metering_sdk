@@ -498,8 +498,38 @@ func TestLocalFSProvider_BuildPath(t *testing.T) {
 			provider, err := NewLocalFSProvider(config)
 			require.NoError(t, err)
 
-			result := provider.buildPath(tt.path)
+			result, err := provider.buildPath(tt.path)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestLocalFSProvider_BuildPath_Containment(t *testing.T) {
+	tempDir := t.TempDir()
+
+	tests := []struct {
+		name   string
+		prefix string
+		path   string
+	}{
+		{name: "parent traversal", prefix: "", path: "../escape.txt"},
+		{name: "nested traversal", prefix: "", path: "a/../../escape.txt"},
+		{name: "traversal via prefix", prefix: "..", path: "escape.txt"},
+		{name: "deep traversal", prefix: "", path: "../../../../etc/passwd"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := NewLocalFSProvider(&ProviderConfig{
+				Type:    ProviderTypeLocalFS,
+				Prefix:  tt.prefix,
+				LocalFS: &LocalFSConfig{BasePath: tempDir},
+			})
+			require.NoError(t, err)
+
+			_, err = provider.buildPath(tt.path)
+			assert.Error(t, err, "path %q must be rejected as escaping the base directory", tt.path)
 		})
 	}
 }
