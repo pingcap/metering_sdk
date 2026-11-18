@@ -233,6 +233,18 @@ func TestTOSOIDCTrimsTokenAndUsesRoleMaxDuration(t *testing.T) {
 	require.Equal(t, defaultTOSAssumeRoleSessionName, gotBody.Get("RoleSessionName"))
 }
 
+func TestTOSOIDCRejectsInvalidExpiration(t *testing.T) {
+	for _, expiration := range []string{"", "2026-11-18 14:00:00"} {
+		t.Run(fmt.Sprintf("%q", expiration), func(t *testing.T) {
+			sts := startOIDCSTSServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"Result":{"Credentials":{"AccessKeyId":"ak","SecretAccessKey":"sk","SessionToken":"token","Expiration":%q}}}`, expiration)
+			})
+			_, err := (&oidcVolcengineTOSCredentialProvider{sts: sts}).GetCredential(context.Background())
+			require.ErrorContains(t, err, "invalid credential expiration")
+		})
+	}
+}
+
 type blockingTransport struct {
 	called atomic.Bool
 }
@@ -430,6 +442,31 @@ func TestTOSRefreshValidCacheReturnsBeforeSTSCompletes(t *testing.T) {
 	fresh, err := p.GetCredential(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "new-ak", fresh.accessKey)
+}
+
+func TestTOSSigningUsesLatestRefreshedCredential(t *testing.T) {
+	// An operation resolves a credential that is due for refresh. A retry
+	// signed after the refresh completes must use the refreshed credential.
+	gate := newTOSRefreshGate(t)
+	p := &cachedVolcengineTOSCredentialProvider{
+		duration:   time.Hour,
+		credential: stsCredential("old", time.Minute),
+		refresh: func(ctx context.Context) (volcengineTOSCredential, error) {
+			if err := gate.wait(ctx); err != nil {
+				return volcengineTOSCredential{}, err
+			}
+			return stsCredential("new", time.Hour), nil
+		},
+	}
+	creds := &tosCredentialsAdapter{provider: p}
+	require.NoError(t, creds.resolve(context.Background()))
+	awaitTOSRefreshSignal(t, gate.started)
+	done := tosRefreshDone(t, p)
+	require.Equal(t, "old-ak", creds.Credential().AccessKeyID)
+
+	gate.open()
+	awaitTOSRefreshSignal(t, done)
+	require.Equal(t, "new-ak", creds.Credential().AccessKeyID)
 }
 
 func TestTOSRefreshCancellationDoesNotCancelSharedColdRefresh(t *testing.T) {

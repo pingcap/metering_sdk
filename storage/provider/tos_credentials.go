@@ -47,6 +47,13 @@ type volcengineTOSCredentialProvider interface {
 	GetCredential(ctx context.Context) (volcengineTOSCredential, error)
 }
 
+// tosSigningCredentialProvider can also report its current credential without
+// waiting, which signing requires.
+type tosSigningCredentialProvider interface {
+	volcengineTOSCredentialProvider
+	peekCredential() (volcengineTOSCredential, bool)
+}
+
 type staticVolcengineTOSCredentialProvider struct {
 	credential volcengineTOSCredential
 }
@@ -56,6 +63,10 @@ func (p *staticVolcengineTOSCredentialProvider) GetCredential(ctx context.Contex
 		return volcengineTOSCredential{}, err
 	}
 	return p.credential, nil
+}
+
+func (p *staticVolcengineTOSCredentialProvider) peekCredential() (volcengineTOSCredential, bool) {
+	return p.credential, true
 }
 
 // cachedVolcengineTOSCredentialProvider starts one bounded refresh on demand
@@ -82,19 +93,7 @@ func (p *cachedVolcengineTOSCredentialProvider) GetCredential(ctx context.Contex
 	if err := ctx.Err(); err != nil {
 		return volcengineTOSCredential{}, err
 	}
-
-	p.mu.Lock()
-	now := time.Now()
-	cached := p.credential
-	valid := cached.accessKey != "" && now.Before(cached.expiresAt)
-	refreshDue := !now.Before(cached.expiresAt.Add(-p.duration/10)) && !now.Before(p.retryAfter)
-	if p.inflight == nil && (!valid || refreshDue) {
-		p.inflight = &volcengineTOSCredentialRefresh{done: make(chan struct{})}
-		go p.refreshCredential(p.inflight)
-	}
-	inflight := p.inflight
-	p.mu.Unlock()
-
+	cached, valid, inflight := p.current()
 	if valid {
 		return cached, nil
 	}
@@ -104,6 +103,28 @@ func (p *cachedVolcengineTOSCredentialProvider) GetCredential(ctx context.Contex
 	case <-inflight.done:
 		return inflight.credential, inflight.err
 	}
+}
+
+func (p *cachedVolcengineTOSCredentialProvider) peekCredential() (volcengineTOSCredential, bool) {
+	cached, valid, _ := p.current()
+	return cached, valid
+}
+
+// current returns the cached credential and whether it is still valid, and
+// starts the shared refresh when one is due. It never waits; when the
+// credential is not valid, the returned refresh is in flight.
+func (p *cachedVolcengineTOSCredentialProvider) current() (volcengineTOSCredential, bool, *volcengineTOSCredentialRefresh) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := time.Now()
+	cached := p.credential
+	valid := cached.accessKey != "" && now.Before(cached.expiresAt)
+	refreshDue := !now.Before(cached.expiresAt.Add(-p.duration/10)) && !now.Before(p.retryAfter)
+	if p.inflight == nil && (!valid || refreshDue) {
+		p.inflight = &volcengineTOSCredentialRefresh{done: make(chan struct{})}
+		go p.refreshCredential(p.inflight)
+	}
+	return cached, valid, p.inflight
 }
 
 func (p *cachedVolcengineTOSCredentialProvider) refreshCredential(inflight *volcengineTOSCredentialRefresh) {
@@ -150,11 +171,10 @@ func (p *cachedVolcengineTOSCredentialProvider) runRefresh(ctx context.Context) 
 // configured static keys, the Volcengine SDK environment keys (VOLCSTACK_*),
 // then VKE OIDC. It never fails: a missing identity is reported by the first
 // request instead of by construction.
-func newVolcengineTOSCredentialProvider(cfg *TOSConfig, sts volcengineSTSClient) volcengineTOSCredentialProvider {
-	var base volcengineTOSCredentialProvider
-	staticCredentials := true
+func newVolcengineTOSCredentialProvider(cfg *TOSConfig, sts volcengineSTSClient) tosSigningCredentialProvider {
+	var static *staticVolcengineTOSCredentialProvider
 	if cfg != nil && cfg.AccessKey != "" && cfg.SecretAccessKey != "" {
-		base = &staticVolcengineTOSCredentialProvider{
+		static = &staticVolcengineTOSCredentialProvider{
 			credential: volcengineTOSCredential{
 				accessKey:    cfg.AccessKey,
 				secretKey:    cfg.SecretAccessKey,
@@ -162,26 +182,27 @@ func newVolcengineTOSCredentialProvider(cfg *TOSConfig, sts volcengineSTSClient)
 			},
 		}
 	} else if env, err := (&vecredentials.EnvProvider{}).Retrieve(); err == nil {
-		base = &staticVolcengineTOSCredentialProvider{
+		static = &staticVolcengineTOSCredentialProvider{
 			credential: volcengineTOSCredential{
 				accessKey:    env.AccessKeyID,
 				secretKey:    env.SecretAccessKey,
 				sessionToken: env.SessionToken,
 			},
 		}
-	} else {
-		base = &oidcVolcengineTOSCredentialProvider{sts: sts}
-		staticCredentials = false
 	}
 
 	roleTRN := ""
 	if cfg != nil {
 		roleTRN = strings.TrimSpace(cfg.AssumeRoleARN)
 	}
-	if roleTRN == "" {
-		if staticCredentials {
-			return base
+	var base volcengineTOSCredentialProvider = &oidcVolcengineTOSCredentialProvider{sts: sts}
+	if static != nil {
+		if roleTRN == "" {
+			return static
 		}
+		base = static
+	}
+	if roleTRN == "" {
 		return &cachedVolcengineTOSCredentialProvider{
 			duration: tosAssumeRoleDuration,
 			refresh:  base.GetCredential,
@@ -243,36 +264,26 @@ func volcengineOIDCEnv() (tokenFile, roleTRN string, err error) {
 // replaces vtos.NewFederationCredentials, which calls STS eagerly in the
 // constructor and keeps signing with an expired credential once a refresh fails.
 type tosCredentialsAdapter struct {
-	provider volcengineTOSCredentialProvider
-
-	mu       sync.Mutex
-	resolved volcengineTOSCredential
+	provider tosSigningCredentialProvider
 }
 
-// resolve obtains a credential under the request context. Every object
-// operation calls it first: waiting for STS happens only here, bounded by the
-// caller's deadline, never in Credential.
+// resolve makes a valid credential available under the request context. Every
+// object operation calls it first: waiting for STS happens only here, bounded
+// by the caller's deadline, never in Credential.
 func (c *tosCredentialsAdapter) resolve(ctx context.Context) error {
-	cred, err := c.provider.GetCredential(ctx)
-	if err != nil {
+	if _, err := c.provider.GetCredential(ctx); err != nil {
 		return fmt.Errorf("resolve TOS credentials: %w", err)
 	}
-	c.mu.Lock()
-	c.resolved = cred
-	c.mu.Unlock()
 	return nil
 }
 
 // Credential implements vtos.Credentials, which takes no context and cannot
-// return an error. The SDK calls it again for every retry, so it only reads the
-// resolved credential. One that expired since resolve yields an empty
-// Credential, which tosCredentialGuardTransport rejects.
+// return an error. The SDK calls it again for every retry, so it signs with the
+// provider's latest valid credential without waiting. If there is none, it
+// returns an empty Credential, which tosCredentialGuardTransport rejects.
 func (c *tosCredentialsAdapter) Credential() vtos.Credential {
-	c.mu.Lock()
-	cred := c.resolved
-	c.mu.Unlock()
-	// A zero expiresAt is a static key, which never expires.
-	if cred.accessKey == "" || (!cred.expiresAt.IsZero() && !time.Now().Before(cred.expiresAt)) {
+	cred, ok := c.provider.peekCredential()
+	if !ok {
 		return vtos.Credential{}
 	}
 	return vtos.Credential{
@@ -326,11 +337,12 @@ func volcengineSTSHost(region string) string {
 	return "sts." + region + ".volcengineapi.com"
 }
 
-func volcengineExpiry(raw string) time.Time {
-	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(raw)); err == nil {
-		return parsed
+func parseVolcengineExpiry(raw string) (time.Time, error) {
+	expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("Volcengine STS returned an invalid credential expiration %q: %w", raw, err)
 	}
-	return time.Now().Add(tosAssumeRoleDuration)
+	return expiresAt, nil
 }
 
 // assumeRoleWithOIDC bypasses the SDK's OIDCCredentialsProvider, which sends
@@ -375,11 +387,15 @@ func (s *volcengineSTS) assumeRoleWithOIDC(ctx context.Context, tokenFile, roleT
 	}
 
 	creds := stsResp.Result.Credentials
+	expiresAt, err := parseVolcengineExpiry(creds.Expiration)
+	if err != nil {
+		return volcengineTOSCredential{}, err
+	}
 	cred := volcengineTOSCredential{
 		accessKey:    strings.TrimSpace(creds.AccessKeyId),
 		secretKey:    strings.TrimSpace(creds.SecretAccessKey),
 		sessionToken: strings.TrimSpace(creds.SessionToken),
-		expiresAt:    volcengineExpiry(creds.Expiration),
+		expiresAt:    expiresAt,
 	}
 	if cred.accessKey == "" || cred.secretKey == "" || cred.sessionToken == "" {
 		return volcengineTOSCredential{}, errors.New("OIDC STS returned empty credentials")
@@ -414,11 +430,15 @@ func (s *volcengineSTS) assumeRole(ctx context.Context, base volcengineTOSCreden
 		return volcengineTOSCredential{}, errors.New("Volcengine STS returned empty credentials")
 	}
 
+	expiresAt, err := parseVolcengineExpiry(volcengine.StringValue(output.Credentials.ExpiredTime))
+	if err != nil {
+		return volcengineTOSCredential{}, err
+	}
 	cred := volcengineTOSCredential{
 		accessKey:    volcengine.StringValue(output.Credentials.AccessKeyId),
 		secretKey:    volcengine.StringValue(output.Credentials.SecretAccessKey),
 		sessionToken: volcengine.StringValue(output.Credentials.SessionToken),
-		expiresAt:    volcengineExpiry(volcengine.StringValue(output.Credentials.ExpiredTime)),
+		expiresAt:    expiresAt,
 	}
 	if cred.accessKey == "" || cred.secretKey == "" || cred.sessionToken == "" {
 		return volcengineTOSCredential{}, errors.New("Volcengine STS returned empty credentials")

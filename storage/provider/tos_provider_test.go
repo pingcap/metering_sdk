@@ -304,15 +304,23 @@ func TestTOSProviderSurfacesResolveErrorInsteadOfSending(t *testing.T) {
 	require.True(t, strings.HasPrefix(next.auth, "TOS4-HMAC-SHA256 Credential=tmp-ak/"), next.auth)
 }
 
-type tosCredentialProviderFunc func(ctx context.Context) (volcengineTOSCredential, error)
+// expiredAtSigningTOSCredentials resolves a valid credential but has none left
+// by the time the SDK signs, as when it expires in between.
+type expiredAtSigningTOSCredentials struct {
+	calls atomic.Int32
+}
 
-func (f tosCredentialProviderFunc) GetCredential(ctx context.Context) (volcengineTOSCredential, error) {
-	return f(ctx)
+func (p *expiredAtSigningTOSCredentials) GetCredential(context.Context) (volcengineTOSCredential, error) {
+	p.calls.Add(1)
+	return stsCredential("tmp", time.Hour), nil
+}
+
+func (p *expiredAtSigningTOSCredentials) peekCredential() (volcengineTOSCredential, bool) {
+	return volcengineTOSCredential{}, false
 }
 
 func TestTOSCredentialExpiredBeforeSigningFailsWithoutWaiting(t *testing.T) {
-	// Real TOS SDK signer and guard. The resolved credential has expired by the
-	// time the SDK signs; signing must not wait on the provider for a new one.
+	// Real TOS SDK signer and guard.
 	next := &recordingTOSTransport{}
 	provider, err := newTOSProvider(&ProviderConfig{
 		Type:   ProviderTypeTOS,
@@ -321,21 +329,11 @@ func TestTOSCredentialExpiredBeforeSigningFailsWithoutWaiting(t *testing.T) {
 		TOS:    &TOSConfig{AccessKey: "ak", SecretAccessKey: "sk"},
 	}, &fakeVolcengineSTS{}, next)
 	require.NoError(t, err)
+	creds := &expiredAtSigningTOSCredentials{}
+	provider.credentials.provider = creds
 
-	var calls atomic.Int32
-	provider.credentials.provider = tosCredentialProviderFunc(func(ctx context.Context) (volcengineTOSCredential, error) {
-		if calls.Add(1) == 1 {
-			return stsCredential("tmp", -time.Second), nil
-		}
-		<-ctx.Done()
-		return volcengineTOSCredential{}, ctx.Err()
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err = provider.Exists(ctx, "metering/ru/1.json.gz")
+	_, err = provider.Exists(context.Background(), "metering/ru/1.json.gz")
 	require.ErrorIs(t, err, errTOSCredentialExpired)
-	require.NoError(t, ctx.Err(), "signing waited on the provider")
-	require.Equal(t, int32(1), calls.Load())
+	require.Equal(t, int32(1), creds.calls.Load(), "signing must not wait on the provider")
 	require.Zero(t, next.calls, "unsigned request must not reach the network")
 }
